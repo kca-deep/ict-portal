@@ -1,0 +1,14 @@
+project_id = "pims-app"
+
+[db]
+major_version = 15
+
+[db.pooler]
+enabled = true
+default_pool_size = 20
+
+[api]
+enabled = true
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
