@@ -47,3 +47,10 @@ pnpm-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 .eslintcache
+
+# Python
+__pycache__/
+*.pyc
+
+# Generated parsing artifacts (rendered PNGs are derivable from source PDFs on demand)
+data/manuals/_tmp_png/
