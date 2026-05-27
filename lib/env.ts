@@ -5,10 +5,11 @@ const envSchema = z.object({
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
 
-  ANTHROPIC_API_KEY: z.string().min(1),
-  COHERE_API_KEY: z.string().min(1),
+  OPENAI_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  COHERE_API_KEY: z.string().optional(),
 
-  LAW_GO_KR_API_KEY: z.string().min(1),
+  LAW_GO_KR_API_KEY: z.string().optional(),
   LAW_GO_KR_BASE_URL: z
     .string()
     .url()
@@ -16,7 +17,7 @@ const envSchema = z.object({
 
   LLM_MODEL: z.string().default("claude-sonnet-4-6"),
 
-  EMBEDDING_MODEL: z.string().default("embed-v4.0"),
+  EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
   EMBEDDING_DIMENSIONS: z.coerce.number().default(1024),
   RERANK_MODEL: z.string().default("rerank-v4.0"),
 
