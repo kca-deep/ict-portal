@@ -143,7 +143,7 @@ Claude Code 지시:
 
 ---
 
-## Part 3. 매뉴얼/지침 vectorDB 색인 (75분)
+## Part 3. 매뉴얼/지침 vectorDB 색인 (85분)
 
 ### 3-0. RAG 검색 전체 흐름과 오늘의 위치 (10분)
 
