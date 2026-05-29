@@ -38,6 +38,7 @@ function buildUserMessage(ctx: ChatContext): string {
 }
 
 export async function* answerStream(ctx: ChatContext): AsyncGenerator<string> {
+  // SDK 0.32.1 타입이 thinking/cache_control 누락 — 런타임은 정상. TODO: SDK 업그레이드 후 cast 제거.
   const stream = anthropic.messages.stream({
     model: env.LLM_MODEL,
     max_tokens: 16000,
@@ -50,7 +51,7 @@ export async function* answerStream(ctx: ChatContext): AsyncGenerator<string> {
       },
     ],
     messages: [{ role: "user", content: buildUserMessage(ctx) }],
-  });
+  } as unknown as Anthropic.MessageStreamParams);
 
   for await (const event of stream) {
     if (
