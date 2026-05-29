@@ -147,13 +147,54 @@ jobs:
 ````markdown
 ## Git
 
-- `main` 직접 push 금지. 브랜치명은 `feat/`, `fix/`, `chore/`, `docs/`, `refactor/` 접두사 사용.
+이 repo의 사용자는 Git에 익숙하지 않으며 **단축 명령**을 통해 작업한다. 사용자가 다음 표현을 쓰면 정의된 절차를 한 번에 실행한다. 단축 명령 외 일반 코드 작업은 평소대로 처리.
+
+### 단축 명령 매핑
+
+**"git pull해줘" / "최신화해줘" / "땡겨줘"**
+1. `git status`로 현재 브랜치 확인.
+2. `git fetch origin`.
+3. main 브랜치면 `git pull --ff-only`.
+4. 작업 브랜치면 `git merge origin/main`.
+5. 충돌 발생 시 **자동 해결하지 않는다.** 충돌 파일 목록을 보고하고 사용자에게 "충돌 해결해줘"라고 시켜달라고 안내.
+
+**"새 작업: <설명>" / "새 브랜치 <설명>"**
+1. `git checkout main && git pull --ff-only`.
+2. 설명에서 브랜치명 추론 (`feat/<scope>-<설명>` 등). 사용자에게 확정 받기.
+3. `git checkout -b <branch>`.
+
+**"git push해줘" / "올려줘" / "PR 올려줘"**
+1. `git status` 확인.
+2. 미커밋 변경이 있으면: 변경 내용 분석 후 Conventional Commits 메시지 제안. 사용자 확정 후 `git commit`.
+3. `pnpm run build` 실행. **실패 시 즉시 중단**하고 오류 보고. push 강행 금지.
+4. 원격 추적 브랜치 없으면 `git push -u origin HEAD`, 있으면 `git push`.
+5. 같은 브랜치 PR 없으면 `gh pr create` 또는 GitHub MCP로 생성. 본문은 커밋 메시지 기반.
+6. PR URL 보고.
+
+**"충돌 해결해줘"**
+1. `git status`로 충돌 파일 목록 확인.
+2. 각 파일을 읽고 양쪽 변경 의도 파악 후 해결. 단순 병합으로 안 되면 사용자에게 옵션 제시.
+3. `pnpm run build` 통과 확인.
+4. `git add <files> && git commit -m "merge: main 반영"`.
+5. **"이제 'git push해줘'라고 시키면 됩니다"** 라고 안내.
+
+**"PR 머지해줘"**
+1. PR 번호와 머지 의사 한 번 더 확인 (실수 방지).
+2. `gh pr merge <#> --squash --delete-branch`.
+3. `git checkout main && git pull --ff-only`로 로컬 동기화.
+4. 다음 작업 가능 상태 보고.
+
+**"CI 결과" / "빌드 상태"**
+1. `gh pr checks` 또는 GitHub MCP로 현재 PR 상태 조회.
+2. 실패 시 `gh run view --log-failed`로 로그 분석 후 요약 보고.
+
+### 규칙
+
+- 머지는 사용자가 명시 요청해야만 실행. **자동 머지 금지.**
+- `git push --force`, `--no-verify`, main에 amend/rebase 금지.
+- 사용자가 비전문가임을 전제로, 에러 발생 시 **다음 액션을 명확히 안내.**
+- 단축 명령 중 어느 단계에서 실패해도 다음 단계로 진행 금지 — 사용자에게 즉시 보고.
 - Conventional Commits (한국어 메시지 허용).
-- Push 전: `pnpm run build` 통과 확인.
-- 사용자가 명시 요청하기 전에는 PR을 merge하지 않는다.
-- 충돌은 로컬에서 해결한다 (GitHub 웹 conflict editor 금지).
-- 작업 시작 시 + 하루 1회: `git fetch origin && git merge origin/main`.
-- 금지: `git push --force` (사용자 명시 요청 시만), `--no-verify`, `main`에 amend/rebase.
 ````
 
 ### 4.2 Branch Protection — `kca-deep` 담당 (1회, 웹에서)
@@ -183,6 +224,34 @@ gh auth login
 ---
 
 ## 5. 일상 워크플로우
+
+### 5.0 단축 명령 — 사용자가 외울 6가지
+
+비전문가 사용자가 외울 것은 다음뿐. 나머지(빌드 검증, 커밋, push, PR 생성, 머지, main 동기화)는 Claude가 자동 처리한다.
+
+| 사용자 입력 (자연어) | Claude 동작 |
+|---|---|
+| **"git pull해줘"** / "최신화" | 현재 브랜치 기준 origin 동기화. 충돌 발견 시 보고만, 자동 해결 안 함. |
+| **"새 작업: <설명>"** | main 최신화 → 브랜치명 제안 → 확정 후 생성. |
+| **"git push해줘"** / "올려줘" | (필요 시 커밋) → 빌드 검증 → push → PR 생성 → URL 보고. 빌드 실패 시 즉시 중단. |
+| **"충돌 해결해줘"** | 충돌 파일 분석 + 해결 + 빌드 검증 + 머지 커밋. 끝나면 "다시 'git push해줘' 시키세요" 안내. |
+| **"PR 머지해줘"** | 사용자 확인 → squash merge + 브랜치 삭제 + 로컬 main 동기화. |
+| **"CI 결과"** | 현재 PR의 빌드 상태 조회. 실패 시 로그 요약. |
+
+### 5.0.1 가장 흔한 시나리오
+
+**A. 아침에 시작**
+> "git pull해줘"
+> "새 작업: 챗봇 응답 인용 검증 추가"
+
+**B. 작업 마무리**
+> "git push해줘"
+→ 빌드 통과하면 PR URL 받음 → "PR 머지해줘"
+
+**C. 중간에 충돌**
+"git pull해줘" 했더니 Claude가 "충돌 났습니다. 충돌 해결해줘 시키세요"라고 보고
+> "충돌 해결해줘"
+→ 해결 완료 보고 → "git push해줘"
 
 ### 5.1 작업 시작
 ```powershell
