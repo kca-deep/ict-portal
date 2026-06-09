@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "streamdown/styles.css";
 
 export const metadata: Metadata = {
   title: "PIMS — 규정법령 어드바이저",

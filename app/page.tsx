@@ -31,18 +31,61 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 사용자가 맨 아래 근처에 있을 때만 자동 스크롤. 위로 올리면 스트리밍 중에도 따라가지 않음.
+  const stickToBottomRef = useRef(true);
+
+  function handleScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    // 맨 아래에 (거의) 닿았을 때만 자동추적 재개. 위로 올린 상태면 따라가지 않음.
+    stickToBottomRef.current = distanceFromBottom < 24;
+  }
+
+  // 사용자의 "위로 스크롤" 의도를 동기적으로 포착해 자동추적을 즉시 해제한다.
+  // onScroll은 다음 프레임에 비동기로 호출되어, 스트리밍 delta가 그 전에
+  // scrollTo로 다시 끌어내리는 것을 막지 못한다. wheel/touch는 동기로 먼저 발생하므로
+  // 여기서 stick=false로 만들면 이후 delta가 화면을 끌어내리지 않는다.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) stickToBottomRef.current = false;
+    };
+    let lastTouchY = 0;
+    const onTouchStart = (e: TouchEvent) => {
+      lastTouchY = e.touches[0]?.clientY ?? 0;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY ?? 0;
+      // 손가락을 아래로 끌면 = 콘텐츠를 위로 스크롤
+      if (y > lastTouchY) stickToBottomRef.current = false;
+      lastTouchY = y;
+    };
+
+    el.addEventListener("wheel", onWheel, { passive: true });
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: true });
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+    };
+  }, []);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth",
-    });
+    if (!stickToBottomRef.current) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight });
   }, [messages]);
 
   async function send() {
     const text = input.trim();
     if (!text || loading) return;
 
+    stickToBottomRef.current = true;
     const userMsg: Message = { role: "user", content: text };
     const historyForApi = [...messages, userMsg].map(({ role, content }) => ({
       role,
@@ -163,6 +206,7 @@ export default function Home() {
         {/* Conversation */}
         <div
           ref={scrollRef}
+          onScroll={handleScroll}
           className="flex-1 overflow-y-auto px-6 py-6 space-y-4"
         >
           {messages.length === 0 && (
@@ -192,21 +236,9 @@ export default function Home() {
                   AI
                 </div>
                 <div className="max-w-[78%] flex flex-col gap-2">
-                  <div className="rounded-2xl rounded-tl-md px-4 py-3 bg-accent text-accent-foreground shadow-lg text-sm break-words">
+                  <div className="rounded-2xl rounded-tl-md px-4 py-3 bg-accent text-accent-foreground shadow-sm break-words">
                     {m.content ? (
-                      <Response
-                        className={
-                          "text-accent-foreground " +
-                          "prose-headings:text-accent-foreground " +
-                          "prose-strong:text-accent-foreground " +
-                          "prose-a:text-accent-foreground " +
-                          "prose-code:text-accent-foreground " +
-                          "prose-blockquote:text-accent-foreground/80 " +
-                          "prose-blockquote:border-accent-foreground/30"
-                        }
-                      >
-                        {m.content}
-                      </Response>
+                      <Response>{m.content}</Response>
                     ) : (
                       <span className="inline-flex gap-1 items-center text-accent-foreground/70">
                         <span className="w-1.5 h-1.5 rounded-full bg-accent-foreground animate-bounce [animation-delay:-0.3s]" />
@@ -257,69 +289,87 @@ export default function Home() {
   );
 }
 
-function Sources({ sources }: { sources: SourceChunk[] }) {
-  const [open, setOpen] = useState(true);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+/**
+ * 접힌 미리보기용: 표(| ... |, |---|) 줄은 통째로 건너뛰고, 마크다운 기호
+ * (#, *, >, ` 등)를 걷어낸 본문 텍스트만 한 줄로 압축한다.
+ */
+function plainPreview(md: string): string {
+  const kept: string[] = [];
+  for (const raw of md.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    // 표 구분선 (|---|---|, :---:) 제외
+    if (/^\|?\s*:?-{3,}/.test(line)) continue;
+    // 표 행 (파이프가 2개 이상) 제외
+    if ((line.match(/\|/g)?.length ?? 0) >= 2) continue;
+    kept.push(line);
+  }
+  return kept
+    .join(" ")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/[*_`>|]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
+function Sources({ sources }: { sources: SourceChunk[] }) {
   return (
     <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm overflow-hidden">
+      <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
+        참조 문서 {sources.length}건
+      </div>
+      <ol className="divide-y divide-border">
+        {sources.map((s, i) => (
+          <SourceItem key={s.id} index={i} source={s} />
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function SourceItem({ index, source }: { index: number; source: SourceChunk }) {
+  const [open, setOpen] = useState(false);
+  const article = (source.metadata?.article as string | undefined) ?? null;
+
+  return (
+    <li className="text-xs">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted/40 transition-colors"
+        className="w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-muted/40 transition-colors"
+        aria-expanded={open}
       >
-        <span>참조 문서 {sources.length}건</span>
-        <span className="text-[10px]">{open ? "▾" : "▸"}</span>
+        <span className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-md bg-primary/15 text-primary font-semibold text-[10px]">
+          {index + 1}
+        </span>
+        <span className="flex-1 min-w-0">
+          <span className="flex flex-wrap items-baseline gap-x-1.5">
+            <span className="font-semibold text-foreground">
+              {source.title ?? "(제목 없음)"}
+            </span>
+            {article && (
+              <span className="text-[10px] text-muted-foreground">{article}</span>
+            )}
+          </span>
+          {!open && (
+            <span className="block truncate text-muted-foreground/80">
+              {plainPreview(source.content)}
+            </span>
+          )}
+        </span>
+        <span className="shrink-0 text-[10px] text-muted-foreground/70 mt-0.5">
+          {open ? "▾" : "▸"}
+        </span>
       </button>
       {open && (
-        <ol className="divide-y divide-border">
-          {sources.map((s, i) => {
-            const isOpen = expandedId === s.id;
-            const article =
-              (s.metadata?.article as string | undefined) ?? null;
-            const preview =
-              s.content.length > 220 ? s.content.slice(0, 220) + "…" : s.content;
-            return (
-              <li key={s.id} className="px-3 py-2 text-xs">
-                <div className="flex items-start gap-2">
-                  <span className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-md bg-primary/15 text-primary font-semibold text-[10px]">
-                    {i + 1}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      <span className="font-semibold text-foreground truncate">
-                        {s.title ?? "(제목 없음)"}
-                      </span>
-                      {article && (
-                        <span className="text-[10px] text-muted-foreground">
-                          {article}
-                        </span>
-                      )}
-                    </div>
-                    {s.source_ref && (
-                      <div className="text-[10px] text-muted-foreground truncate">
-                        출처: {s.source_ref}
-                      </div>
-                    )}
-                    <p className="mt-1 text-muted-foreground whitespace-pre-wrap leading-relaxed">
-                      {isOpen ? s.content : preview}
-                    </p>
-                    {s.content.length > 220 && (
-                      <button
-                        onClick={() =>
-                          setExpandedId(isOpen ? null : s.id)
-                        }
-                        className="mt-1 text-[10px] font-medium text-primary hover:underline"
-                      >
-                        {isOpen ? "접기" : "더 보기"}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
+        <div className="px-3 pb-3 text-muted-foreground">
+          <Response>{source.content}</Response>
+          {source.source_ref && (
+            <p className="mt-2 text-[10px] text-muted-foreground/70">
+              출처: {source.source_ref}
+            </p>
+          )}
+        </div>
       )}
-    </div>
+    </li>
   );
 }

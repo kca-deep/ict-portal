@@ -2,7 +2,15 @@ import type { Config } from "tailwindcss";
 
 const config: Config = {
   darkMode: "class",
-  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
+  content: [
+    "./app/**/*.{ts,tsx}",
+    "./components/**/*.{ts,tsx}",
+    // Streamdown은 마크다운 요소(제목·리스트·표·코드·인용)를 자체 유틸 클래스로
+    // 스타일한다. 이 경로를 스캔하지 않으면 해당 클래스가 purge되어 마크다운이 깨진다.
+    // pnpm 심볼릭 링크 경로와 실제 .pnpm 경로를 모두 지정(둘 중 하나만 매칭돼도 됨).
+    "./node_modules/streamdown/dist/**/*.js",
+    "./node_modules/.pnpm/streamdown@*/node_modules/streamdown/dist/**/*.js",
+  ],
   theme: {
     extend: {
       colors: {

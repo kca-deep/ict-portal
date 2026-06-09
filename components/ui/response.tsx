@@ -33,22 +33,15 @@ export const Response = memo(
       [plugins],
     );
 
+    // Streamdown은 모든 마크다운 요소를 자체 유틸 클래스로 스타일하므로 prose 래퍼를
+    // 쓰지 않는다(prose를 덧씌우면 마진·색이 이중 적용되어 충돌). 여기서는 말풍선
+    // 안쪽에 맞춰 첫·마지막 블록의 바깥 여백만 제거한다.
     return (
       <Streamdown
         data-slot="response"
         plugins={mergedPlugins}
         className={cn(
-          "prose prose-sm dark:prose-invert max-w-none",
-          "prose-headings:font-semibold prose-headings:tracking-tight",
-          "prose-p:leading-relaxed prose-li:leading-relaxed",
-          "prose-pre:bg-muted prose-pre:text-foreground prose-pre:rounded-md",
-          "prose-code:before:content-none prose-code:after:content-none",
-          "prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-[0.85em]",
-          "prose-a:text-primary hover:prose-a:underline",
-          "prose-table:my-2 prose-table:border prose-table:border-border",
-          "prose-th:bg-muted/40 prose-th:px-2 prose-th:py-1 prose-th:border prose-th:border-border",
-          "prose-td:px-2 prose-td:py-1 prose-td:border prose-td:border-border",
-          "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          "text-sm leading-relaxed [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
           className,
         )}
         {...props}
