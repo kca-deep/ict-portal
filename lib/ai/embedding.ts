@@ -1,27 +1,29 @@
-import { CohereClient } from "cohere-ai";
+import OpenAI from "openai";
 import { env } from "@/lib/env";
 
-const cohere = new CohereClient({ token: env.COHERE_API_KEY });
+let _openai: OpenAI | null = null;
+function getOpenAI(): OpenAI {
+  if (!_openai) {
+    if (!env.OPENAI_API_KEY) {
+      throw new Error("OPENAI_API_KEY 누락 (.env.local 확인)");
+    }
+    _openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
 
-export type EmbeddingInputType = "search_query" | "search_document";
-
-export async function embed(
-  texts: string[],
-  inputType: EmbeddingInputType
-): Promise<number[][]> {
+export async function embed(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
-  const response = await cohere.v2.embed({
+  const res = await getOpenAI().embeddings.create({
     model: env.EMBEDDING_MODEL,
-    texts,
-    inputType,
-    embeddingTypes: ["float"],
-    outputDimension: env.EMBEDDING_DIMENSIONS,
+    input: texts,
+    dimensions: env.EMBEDDING_DIMENSIONS,
   });
-  return response.embeddings.float ?? [];
+  return res.data.map((d) => d.embedding);
 }
 
 export async function embedQuery(text: string): Promise<number[]> {
-  const [vec] = await embed([text], "search_query");
+  const [vec] = await embed([text]);
   if (!vec) throw new Error("embedding returned no vector");
   return vec;
 }

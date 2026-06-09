@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { env } from "@/lib/env";
-import { SYSTEM_PROMPT } from "@/lib/ai/prompts";
+import { CHAT_SYSTEM_PROMPT, SYSTEM_PROMPT } from "@/lib/ai/prompts";
 
 const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
@@ -14,7 +14,12 @@ export type RetrievedDoc = {
 export type ChatContext = {
   query: string;
   retrievedDocs: RetrievedDoc[];
-  lawContext?: string; // 법령 도구 (lib/law/) 호출 결과 (옵션)
+  lawContext?: string;
+};
+
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
 };
 
 function buildContextBlock(ctx: ChatContext): string {
@@ -52,6 +57,78 @@ export async function* answerStream(ctx: ChatContext): AsyncGenerator<string> {
     ],
     messages: [{ role: "user", content: buildUserMessage(ctx) }],
   } as unknown as Anthropic.MessageStreamParams);
+
+  for await (const event of stream) {
+    if (
+      event.type === "content_block_delta" &&
+      event.delta.type === "text_delta"
+    ) {
+      yield event.delta.text;
+    }
+  }
+}
+
+export async function* chatStream(
+  messages: ChatMessage[],
+): AsyncGenerator<string> {
+  const stream = anthropic.messages.stream({
+    model: env.LLM_MODEL,
+    max_tokens: 4096,
+    system: [
+      {
+        type: "text",
+        text: CHAT_SYSTEM_PROMPT,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+  });
+
+  for await (const event of stream) {
+    if (
+      event.type === "content_block_delta" &&
+      event.delta.type === "text_delta"
+    ) {
+      yield event.delta.text;
+    }
+  }
+}
+
+/**
+ * RAG 챗 스트림: 멀티턴 히스토리를 유지하면서, 마지막 user 메시지에만
+ * 검색된 청크를 <context> 블록으로 감싸 주입한다.
+ */
+export async function* ragChatStream(
+  messages: ChatMessage[],
+  retrievedDocs: RetrievedDoc[],
+): AsyncGenerator<string> {
+  if (messages.length === 0) return;
+
+  const lastIdx = messages.length - 1;
+  const last = messages[lastIdx];
+
+  const augmented: ChatMessage = {
+    role: last.role,
+    content:
+      retrievedDocs.length > 0
+        ? buildUserMessage({ query: last.content, retrievedDocs })
+        : last.content,
+  };
+
+  const finalMessages = [...messages.slice(0, lastIdx), augmented];
+
+  const stream = anthropic.messages.stream({
+    model: env.LLM_MODEL,
+    max_tokens: 4096,
+    system: [
+      {
+        type: "text",
+        text: SYSTEM_PROMPT,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    messages: finalMessages.map((m) => ({ role: m.role, content: m.content })),
+  });
 
   for await (const event of stream) {
     if (

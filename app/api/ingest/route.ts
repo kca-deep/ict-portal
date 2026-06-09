@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
 
     let embeddings: number[][];
     try {
-      embeddings = await embed(texts, "search_document");
+      embeddings = await embed(texts);
     } catch (err) {
       return Response.json(
         { error: `embedding failed at batch ${i}: ${(err as Error).message}`, inserted },
