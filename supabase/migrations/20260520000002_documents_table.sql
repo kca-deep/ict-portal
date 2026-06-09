@@ -9,7 +9,7 @@ create table if not exists public.documents (
   chunk_index     int    not null default 0,             -- 원문 분할 인덱스
   source_ref      text,                                  -- 출처 식별자 (내부 문서번호 등)
   metadata        jsonb  not null default '{}'::jsonb,
-  embedding       extensions.vector(1024),               -- Cohere embed-v4 (1024d)
+  embedding       extensions.vector(1024),               -- OpenAI text-embedding-3-small (1024d)
   fts             tsvector generated always as (
                     to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, ''))
                   ) stored,
@@ -18,7 +18,7 @@ create table if not exists public.documents (
 );
 
 comment on table public.documents is 'PIMS 자체 색인 문서 (내부 규정/FAQ/해석사례). 외부 법령은 법제처 OpenAPI로 실시간 조회.';
-comment on column public.documents.embedding is 'Cohere embed-v4.0 1024-dim';
+comment on column public.documents.embedding is 'OpenAI text-embedding-3-small 1024-dim';
 comment on column public.documents.metadata is '예: {"chapter":"제2장","article":"제5조","tags":["사업비","집행"]}';
 
 -- HNSW vector index (Supabase 2026 권장 기본)
