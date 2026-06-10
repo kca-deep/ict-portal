@@ -64,7 +64,7 @@
 ```
 
 - **임베딩(색인+쿼리)**: OpenAI `text-embedding-3-small` (1024차원). 한 번 정한 모델을 영구 유지하며, 교체나 전체 재색인은 하지 않습니다.
-- **재정렬**: Cohere `rerank-v4.0`. 검색이 끝난 뒤 별도로 도는 단계이며, 임베딩과는 무관합니다.
+- **재정렬**: Cohere `rerank-v3.5`. 검색이 끝난 뒤 별도로 도는 단계이며, 임베딩과는 무관합니다.
 - **법령**: korean-law MCP(법제처)를 통해 조회합니다.
 - **답변 LLM**: Anthropic Claude `claude-sonnet-4-6`. 스트리밍과 프롬프트 캐싱을 사용합니다.
 
@@ -81,7 +81,7 @@
 | DB · 벡터 | **Supabase Postgres + pgvector + tsvector** | Pinecone, Weaviate | RLS·Auth·Storage 통합, hybrid_search SQL 함수 native |
 | 벡터 인덱스 | **HNSW (vector_ip_ops)** | IVFFlat | 2026년 pgvector 권장, 사전 색인 가능 |
 | 임베딩 | **OpenAI `text-embedding-3-small` (1024차원)** | Cohere embed, OpenAI 3-large | 색인·쿼리 동일 모델로 영구 유지, 1024차원으로 pgvector 효율, 안정적 운영 |
-| 리랭킹(재정렬) | **Cohere `rerank-v4.0` multilingual** | Voyage Rerank 2.5, Jina v2 | 한국어 포함 다국어 지원, 검색 후 적합도 재정렬에 특화 |
+| 리랭킹(재정렬) | **Cohere `rerank-v3.5` multilingual** | Voyage Rerank 2.5, Jina v2 | 한국어 포함 다국어 지원, 검색 후 적합도 재정렬에 특화 |
 | 답변 LLM | **Claude `claude-sonnet-4-6` 단독** | GPT-5.5, Opus 듀얼 | 긴 컨텍스트, 스트리밍·프롬프트 캐싱 지원, Opus 대비 저렴. 평가 후 필요시 Opus 라우팅 추가 |
 | 법령 도구 | **korean-law MCP (법제처)** | 자체 Tool Use 구현 | 법제처 공식 데이터 기반, 실시간 조회, 인용 검증(verify_citations) 제공. 표준 MCP라 도구 추가·교체 용이 |
 | 크롤링 | **fetch + cheerio** | Playwright | 정적 HTML 위주. JS 렌더링 필요 사이트만 외부 스크래핑 API 도입 검토 |
@@ -98,7 +98,7 @@
 | **Vercel** | 호스팅, 함수, Cron | Pro 구독 + 사용량 | 콘솔에서 발급된 deployment token |
 | **Supabase** | Postgres, Auth, Storage | Pro 구독 + 사용량 | `SUPABASE_SERVICE_ROLE_KEY` (서버 전용) |
 | **OpenAI** | **임베딩** (색인+쿼리, `text-embedding-3-small`) | 토큰 종량 | `OPENAI_API_KEY` |
-| **Cohere** | **재정렬** (`rerank-v4.0`) | 토큰 종량 | `COHERE_API_KEY` |
+| **Cohere** | **재정렬** (`rerank-v3.5`) | 토큰 종량 | `COHERE_API_KEY` |
 | **Anthropic** | 답변 LLM (`claude-sonnet-4-6`) | 토큰 종량 | `ANTHROPIC_API_KEY` |
 | **법제처** | korean-law MCP — 법령·판례 조회 | 무료 (호출 한도 있음) | `LAW_GO_KR_API_KEY` |
 
@@ -130,7 +130,7 @@
 │ 2. 질의를 OpenAI text-embedding-3-small(1024차원)로 임베딩  │
 │ 3. Hybrid Search (BM25 + pgvector + RRF)                     │
 │    → 내부 규정 후보 검색                                    │
-│ 4. Cohere rerank-v4.0 재정렬 → 상위 결과 선별              │
+│ 4. Cohere rerank-v3.5 재정렬 → 상위 결과 선별              │
 │ 5. 관련도 분기:                                             │
 │    · 상위 결과 관련도 점수 ≥ 기준치                         │
 │        → 내부 규정만 근거로 사용                            │

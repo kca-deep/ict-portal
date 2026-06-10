@@ -19,10 +19,12 @@ const envSchema = z.object({
 
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
   EMBEDDING_DIMENSIONS: z.coerce.number().default(1024),
-  RERANK_MODEL: z.string().default("rerank-v4.0"),
+  RERANK_MODEL: z.string().default("rerank-v3.5"),
 
   RETRIEVAL_TOP_K: z.coerce.number().default(30),
   RERANK_TOP_K: z.coerce.number().default(8),
+  // 관련도 분기 기준치 (rerank 최상위 relevanceScore, 0~1). 미만이면 법제처 폴백.
+  RELEVANCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.15),
 
   CRAWLER_USER_AGENT: z.string().default("PIMS-Crawler/1.0"),
   CRAWLER_TIMEOUT_MS: z.coerce.number().default(10000),

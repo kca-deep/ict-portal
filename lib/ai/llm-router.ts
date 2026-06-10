@@ -1,6 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { env } from "@/lib/env";
-import { CHAT_SYSTEM_PROMPT, SYSTEM_PROMPT } from "@/lib/ai/prompts";
+import {
+  CHAT_SYSTEM_PROMPT,
+  RELEVANCE_GATE_PROMPT,
+  SYSTEM_PROMPT,
+} from "@/lib/ai/prompts";
 
 const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
@@ -40,6 +44,46 @@ function buildContextBlock(ctx: ChatContext): string {
 
 function buildUserMessage(ctx: ChatContext): string {
   return `<context>\n${buildContextBlock(ctx)}\n</context>\n\n질문: ${ctx.query}`;
+}
+
+/**
+ * 적합성 게이트: 검색된 내부 규정만으로 질문에 답할 핵심 근거가 있는지 LLM이 YES/NO로 판정.
+ * "관련도 점수는 기준치 이상이지만 실제로는 규정에 답이 없는" 회색지대를 잡아
+ * 법제처 폴백 여부를 결정한다. 실패 시 충분(true)으로 폴백해 답변을 막지 않는다.
+ */
+export async function isRegulationSufficient(
+  query: string,
+  retrievedDocs: RetrievedDoc[],
+): Promise<boolean> {
+  if (retrievedDocs.length === 0) return false;
+  try {
+    const context = retrievedDocs
+      .map((d, i) => `[자료 ${i + 1}] ${d.title ?? ""}\n${d.content}`)
+      .join("\n\n");
+    const res = await anthropic.messages.create({
+      model: env.LLM_MODEL,
+      max_tokens: 8,
+      system: [{ type: "text", text: RELEVANCE_GATE_PROMPT }],
+      messages: [
+        {
+          role: "user",
+          content: `질문: ${query}\n\n<내부규정>\n${context}\n</내부규정>\n\n위 내부 규정만으로 질문의 핵심에 답할 수 있으면 YES, 핵심 근거가 없으면 NO. 한 단어만.`,
+        },
+      ],
+    });
+    const text = res.content
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("")
+      .trim()
+      .toUpperCase();
+    return !text.startsWith("NO");
+  } catch (err) {
+    console.error(
+      "[chat] relevance gate failed, treating as sufficient:",
+      (err as Error).message,
+    );
+    return true;
+  }
 }
 
 export async function* answerStream(ctx: ChatContext): AsyncGenerator<string> {
@@ -101,18 +145,19 @@ export async function* chatStream(
 export async function* ragChatStream(
   messages: ChatMessage[],
   retrievedDocs: RetrievedDoc[],
+  lawContext?: string,
 ): AsyncGenerator<string> {
   if (messages.length === 0) return;
 
   const lastIdx = messages.length - 1;
   const last = messages[lastIdx];
 
+  const hasContext = retrievedDocs.length > 0 || Boolean(lawContext);
   const augmented: ChatMessage = {
     role: last.role,
-    content:
-      retrievedDocs.length > 0
-        ? buildUserMessage({ query: last.content, retrievedDocs })
-        : last.content,
+    content: hasContext
+      ? buildUserMessage({ query: last.content, retrievedDocs, lawContext })
+      : last.content,
   };
 
   const finalMessages = [...messages.slice(0, lastIdx), augmented];

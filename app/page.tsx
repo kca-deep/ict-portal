@@ -327,9 +327,16 @@ function Sources({ sources }: { sources: SourceChunk[] }) {
   );
 }
 
+// Cohere relevanceScore(0~1)를 관련도 %로 변환. 0~100 범위로 안전하게 클램프.
+function relevancePercent(score: number): number {
+  return Math.max(0, Math.min(100, Math.round(score * 100)));
+}
+
 function SourceItem({ index, source }: { index: number; source: SourceChunk }) {
   const [open, setOpen] = useState(false);
   const article = (source.metadata?.article as string | undefined) ?? null;
+  const isLaw = source.metadata?.kind === "law";
+  const percent = relevancePercent(source.score);
 
   return (
     <li className="text-xs">
@@ -356,6 +363,21 @@ function SourceItem({ index, source }: { index: number; source: SourceChunk }) {
             </span>
           )}
         </span>
+        {isLaw ? (
+          <span
+            className="shrink-0 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary mt-0.5"
+            title="법제처 국가법령정보"
+          >
+            법제처 법령
+          </span>
+        ) : (
+          <span
+            className="shrink-0 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-primary mt-0.5"
+            title="검색 관련도 (Cohere rerank)"
+          >
+            {percent}% 관련도
+          </span>
+        )}
         <span className="shrink-0 text-[10px] text-muted-foreground/70 mt-0.5">
           {open ? "▾" : "▸"}
         </span>

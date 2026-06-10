@@ -68,7 +68,7 @@
 |---|---|
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase 서버측 DB 쓰기 |
 | `OPENAI_API_KEY` | **임베딩** (`text-embedding-3-small`, 1024차원) |
-| `COHERE_API_KEY` | **재정렬** (`rerank-v4.0`) |
+| `COHERE_API_KEY` | **재정렬** (`rerank-v3.5`) |
 | `ANTHROPIC_API_KEY` | 답변 **LLM** (`claude-sonnet-4-6`) |
 | `LAW_GO_KR_API_KEY` | 법제처 법령 API (korean-law MCP) |
 
@@ -216,7 +216,7 @@ create policy "query_log_admin" on public.query_log
 | Supabase Pro | $25 | $25 |
 | Anthropic Claude `sonnet-4-6` | $3/M input, $15/M output | $30~60 |
 | **OpenAI 임베딩** (`text-embedding-3-small`, 초기 1회 100K 청크) | $0.02/M tokens | 초기 약 $2, 운영 미미 |
-| Cohere 재정렬 (`rerank-v4.0`, 3K queries) | 쿼리 단가 | $5~10 |
+| Cohere 재정렬 (`rerank-v3.5`, 3K queries) | 쿼리 단가 | $5~10 |
 | 법제처 API (korean-law MCP) | 무료 | $0 |
 | **합계 (운영 정상화 후)** | | **약 $80~120/월** |
 
@@ -310,7 +310,7 @@ PoC 단계는 사용량이 적어 무료 티어 + Pro 구독 비용 정도.
 | Next.js | 웹/API 프레임워크 | MIT |
 | @supabase/supabase-js | DB·Auth 클라이언트 | MIT |
 | openai | **임베딩** (`text-embedding-3-small`) | MIT/Apache-2.0 계열 |
-| cohere-ai | **재정렬** (`rerank-v4.0`) | MIT |
+| cohere-ai | **재정렬** (`rerank-v3.5`) | MIT |
 | @anthropic-ai/sdk | 답변 LLM (`claude-sonnet-4-6`) | MIT |
 | cheerio | 크롤링 HTML 파싱 | MIT |
 | zod | 입력 검증 | MIT |

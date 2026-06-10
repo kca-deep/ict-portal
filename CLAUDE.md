@@ -21,7 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Supabase Postgres + pgvector(1024d, HNSW) + tsvector + RLS
 - Anthropic Claude Sonnet 4.6 (답변 LLM, 단독, 1M context)
 - **임베딩: OpenAI `text-embedding-3-small` (1024d, 색인=쿼리 동일, 영구 고정 — 교체·재색인 없음)**
-- **재정렬: Cohere `rerank-v4.0` (검색 뒤 별도 단계, 임베딩과 무관)**
+- **재정렬: Cohere `rerank-v3.5` (검색 뒤 별도 단계, 임베딩과 무관)**
 - **법령: korean-law MCP (법제처 법령·판례 실시간 조회 + 인용 검증)**
 - Vercel Pro + Fluid Compute · Node 런타임 고정 (Edge 미사용)
 
