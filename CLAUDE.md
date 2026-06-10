@@ -85,29 +85,12 @@ pnpm db:reset     # DB 초기화
 | `05-feature-crawler.md` | ② 공모사업 크롤러 설계 (8월 예정) |
 | `07-security-ops.md` | 보안·운영·키 관리·하드닝 정책 |
 
-> Git 워크플로우는 아래 본 파일의 해당 섹션 참조(별도 문서 없음).
+## Git 사용
 
-## Git 워크플로우 — 단축 명령 인터페이스
-
-사용자(`bcchung81`)는 Git 비전문가. 자연어 단축 명령으로 작업하며 Claude가 내부 절차를 자동 처리한다. **각 단축 명령은 사용자가 명시했을 때만 발동**. 일반 코드 작업은 평소대로.
-
-| 사용자 입력 | Claude 자동 처리 |
-|---|---|
-| "git pull해줘" / "최신화" | `git fetch origin` → (main이면) `pull --ff-only`, (작업 브랜치면) `merge origin/main`. **충돌 시 자동 해결 금지, 보고만.** |
-| "새 작업: <설명>" | main 최신화 → 브랜치명 추론(`feat/<scope>-<설명>` 등) → 사용자 확정 후 `checkout -b`. |
-| "git push해줘" / "올려줘" | (필요 시) 커밋 메시지 제안 + 커밋 → `pnpm run build` → push → PR 생성 → URL 보고. **빌드 실패 시 즉시 중단, push 강행 금지.** |
-| "충돌 해결해줘" | 파일별 충돌 분석/해결 → `pnpm run build` 검증 → `merge: main 반영` 커밋 → 사용자에게 "다시 'git push해줘' 시키세요" 안내. |
-| "PR 머지해줘" | 머지 의사 한 번 더 확인 → `gh pr merge <#> --squash --delete-branch` → 로컬 main 동기화. |
-| "CI 결과" / "빌드 상태" | 현재 PR 빌드 상태 조회. 실패 시 로그 요약. |
-
-### 작동 원칙
-
-- 단축 명령 중 어느 단계가 실패하면 **다음 단계로 진행 금지**, 사용자에게 즉시 보고 + 다음 액션 안내.
-- 머지는 사용자 명시 요청 시에만. **자동 머지 금지.**
-- 브랜치 네이밍: `feat/`, `fix/`, `chore/`, `docs/`, `refactor/` 접두사.
-- 커밋: Conventional Commits, 한국어 메시지 허용.
-- 충돌은 로컬에서 해결 (GitHub 웹 conflict editor 금지 — 빌드 검증 불가).
-- **금지**: `git push --force` (사용자 명시 요청 시만), `--no-verify`, `main`에 amend/rebase, `node_modules/`/`.env*` 커밋.
+- 단순 `git pull` / `git push`로 작업한다. **PR 생성·브랜치 분기·머지 자동화 없음.**
+- "git pull" → `git pull`로 main 최신화.
+- "git push" → (필요 시) 커밋 후 `git push`. push 전 `pnpm run build` 통과 권장, 빌드 실패 시 중단·보고.
+- **금지**: `git push --force`(명시 요청 시만), `--no-verify`, `node_modules/`/`.env*` 커밋.
 
 ## PoC 운영 정책
 
