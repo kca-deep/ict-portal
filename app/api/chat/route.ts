@@ -8,6 +8,7 @@ import {
 import { regulationSearch, type DocumentHit } from "@/lib/db/search";
 import { rerank } from "@/lib/ai/rerank";
 import { searchLaw } from "@/lib/law/search";
+import { verifyCitations, type CitationVerdict } from "@/lib/law/verify";
 import { env } from "@/lib/env";
 
 export const runtime = "nodejs";
@@ -30,6 +31,7 @@ export type StreamEvent =
   | { type: "sources"; data: SourceChunk[] }
   | { type: "routing"; route: "regulation" | "law"; score: number; laws?: { name: string; lawId: string }[] }
   | { type: "delta"; text: string }
+  | { type: "citations"; data: CitationVerdict[]; hasHallucination: boolean }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -169,8 +171,10 @@ export async function POST(req: NextRequest) {
             (routedToLaw ? ` laws=[${lawRefs.map((r) => r.name).join(", ")}]` : " (법제처 미호출)"),
         );
 
-        // 5) 답변을 먼저 스트리밍한다.
+        // 5) 답변을 먼저 스트리밍한다. (인용 검증용으로 본문을 누적)
+        let answerText = "";
         for await (const chunk of ragChatStream(body.messages, retrievedDocs, lawContext)) {
+          answerText += chunk;
           send(controller, { type: "delta", text: chunk });
         }
 
@@ -184,6 +188,27 @@ export async function POST(req: NextRequest) {
             : { type: "routing", route: "regulation", score: maxScore },
         );
         send(controller, { type: "sources", data: displayedSources });
+
+        // 7) 법령 분기면 답변의 조문 인용을 법제처 DB와 교차 검증(환각 차단).
+        //    답변이 이미 스트리밍 완료된 뒤라 체감 지연 없음. best-effort.
+        if (routedToLaw) {
+          try {
+            const check = await verifyCitations(answerText);
+            if (check.verdicts.length > 0) {
+              send(controller, {
+                type: "citations",
+                data: check.verdicts,
+                hasHallucination: check.hasHallucination,
+              });
+              console.log(
+                `[chat] citations verified=${check.verdicts.filter((v) => v.status === "verified").length}/${check.verdicts.length} ` +
+                  `hallucination=${check.hasHallucination}`,
+              );
+            }
+          } catch (err) {
+            console.error("[chat] citation verify failed:", (err as Error).message);
+          }
+        }
 
         send(controller, { type: "done" });
       } catch (err) {

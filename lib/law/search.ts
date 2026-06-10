@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { expandLawAbbreviation } from "@/lib/law/abbreviations";
 
 /**
  * 법제처 국가법령정보 공동활용 OpenAPI 조회.
@@ -11,9 +12,9 @@ import { env } from "@/lib/env";
  * (route 가 법령 없이도 내부 규정만으로 계속 진행할 수 있어야 한다.)
  */
 
-const SEARCH_URL =
+export const SEARCH_URL =
   env.LAW_GO_KR_BASE_URL ?? "https://www.law.go.kr/DRF/lawSearch.do";
-const SERVICE_URL = SEARCH_URL.replace("lawSearch.do", "lawService.do");
+export const SERVICE_URL = SEARCH_URL.replace("lawSearch.do", "lawService.do");
 
 export type LawRef = {
   name: string; // 법령명한글
@@ -66,7 +67,7 @@ function flatten(v: unknown): string {
   return String(v);
 }
 
-async function getJson(url: string): Promise<any | null> {
+export async function getJson(url: string): Promise<any | null> {
   try {
     const res = await fetch(url, { headers: { Accept: "application/json" } });
     if (!res.ok) return null;
@@ -77,7 +78,7 @@ async function getJson(url: string): Promise<any | null> {
 }
 
 // lawSearch.do — 법령명으로 목록 조회.
-async function searchByName(
+export async function searchByName(
   oc: string,
   term: string,
   display: number,
@@ -145,6 +146,33 @@ async function fetchArticles(
   });
 }
 
+// lawService.do — 법령ID로 본문 조회 후 실존 조문번호 집합을 구성.
+// 인용 검증용: "제15조" → "제15조", "제401조의2" → "제401조의2" 형태의 키 Set.
+export async function fetchArticleNumbers(
+  oc: string,
+  lawId: string,
+): Promise<Set<string>> {
+  const qs = new URLSearchParams({
+    OC: oc,
+    target: "law",
+    type: "JSON",
+    ID: lawId,
+  }).toString();
+  const json = await getJson(`${SERVICE_URL}?${qs}`);
+  const set = new Set<string>();
+  if (!json) return set;
+  const law = json.법령 ?? json.Law ?? Object.values(json)[0];
+  const root = law?.조문?.조문단위 ?? law?.조문;
+  const articles: any[] = Array.isArray(root) ? root : root ? [root] : [];
+  for (const a of articles) {
+    const no = String(a?.["조문번호"] ?? "").trim();
+    if (!no || !/^\d+$/.test(no)) continue;
+    const branch = String(a?.["조문가지번호"] ?? "").trim();
+    set.add(branch ? `제${no}조의${branch}` : `제${no}조`);
+  }
+  return set;
+}
+
 export async function searchLaw(
   query: string,
   display = 3,
@@ -152,7 +180,8 @@ export async function searchLaw(
   const oc = env.LAW_GO_KR_API_KEY;
   if (!oc) return { refs: [], context: "", articles: [] };
 
-  const lawNames = extractLawNames(query);
+  // 추출 법령명을 약칭 확장(관용 약칭 보강) 후 검색어로 사용.
+  const lawNames = extractLawNames(query).map(expandLawAbbreviation);
   const terms = lawNames.length > 0 ? lawNames.slice(0, 2) : [query];
   console.log(
     `[law] 법제처 조회 시작: 추출 법령명=[${lawNames.join(", ")}] 검색어=[${terms.join(", ")}]`,
