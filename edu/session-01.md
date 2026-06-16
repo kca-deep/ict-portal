@@ -142,7 +142,7 @@ pnpm tsx ingest-manuals.ts
 
 ## 6. 스스로 해보기: regulation 테이블과 ICT기금규정 색인 (G ~ J)
 
-같은 날 수업이 끝난 뒤, 교육생이 혼자 한 번 더 해 본 작업이다. 이번에는 규정 문서를 위한 `regulation` 테이블을 만들고 채웠다.
+규정 문서를 위한 `regulation` 테이블을 만들고 채운다.
 
 ### 6-1. regulation 테이블 만들기 (G)
 

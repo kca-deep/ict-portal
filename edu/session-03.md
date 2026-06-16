@@ -1,7 +1,5 @@
 # 3회차 - 검색 정밀도 높이기(Rerank 연결) + 챗봇 화면 개선 + 법령 실시간 조회(korean-law MCP)
 
-> 이 문서는 회차 진행 전 **초안**이다. 화면 개선 항목과 일정은 진행하며 확정한다.
-
 | 항목 | 내용 |
 |------|------|
 | 날짜 | 미정 (예정) |
@@ -316,7 +314,7 @@ RELEVANCE_THRESHOLD=0.7   # (신규) 분기 기준치. 상위 8건 평균 관련
 | **점수 기준** | **Rerank 상위 8건의 관련도 점수 평균**. (기존 `RERANK_TOP_K=8` 재사용) |
 | **출처 표시 규칙** | **내부규정 / 법령**으로 구분해 표기하고, **참조 문서(근거 목록)에 출처 타입 표시**. 뱃지: 📘 내부규정 / ⚖️ 법령. |
 
-> 미정으로 남기는 것: UI 세부 디자인·문구와 회차 일정은 진행하며 확정한다(문서 상단 참조).
+> 미정으로 남기는 것: UI 세부 디자인·문구와 회차 일정은 진행하며 확정한다.
 
 ---
 
@@ -361,19 +359,19 @@ lib/
 
 ### 7-2. 파일별 변경 요약
 
-| 파일 | 작업 | 변경 내용 | 상태 |
-|---|---|---|---|
-| `app/api/chat/route.ts` | ①②③ | 30건 검색 → `rerank()` 상위 8건 → 평균·기준치 분기 → `source_type` 부여 + **stage 이벤트 송출 · 중단(AbortSignal) 대응** | **수정** |
-| `lib/db/search.ts` | ① | `regulationSearch` 를 30건(`RETRIEVAL_TOP_K`)으로 호출 | **수정(호출부)** |
-| `lib/ai/rerank.ts` | ① | Cohere Rerank — 이미 완성, 호출만 연결 | 그대로 |
-| `lib/env.ts` | ③ | `RELEVANCE_THRESHOLD`(0.7) 신규 추가 | **수정** |
-| `lib/ai/llm-router.ts` | ③ | `ragChatStream` 에 `lawContext` 주입 경로 연결 | **수정** |
-| `lib/ai/prompts.ts` | ③ | 근거 출처를 내부규정/법령으로 구분 표기하도록 프롬프트 보강 | **수정** |
-| `lib/law/` | ③ | 법령 조회·인용 검증 도구 (현재 비어 있음) | **신규** |
-| `app/page.tsx` | ② | 복사·예시칩·출처 뱃지 + **근거 클릭 시 우측 패널/바텀시트** + 인라인 인용 마커 + **생성 중단 · 맨 아래로 · 진행 상태 표시** + 공용 타입 사용 | **수정** |
-| `components/ui/response.tsx` | ② | 답변 렌더에 복사 버튼 연동 | **수정** |
-| `components/ui/source-panel.tsx` | ② | **우측 근거 패널 + 모바일 바텀시트 + 정보원 타입별 카드**(📘/⚖️) | **신규** |
-| `lib/types.ts` | ② | **공용 타입**(`Message`·`SourceChunk`·`StreamEvent`·`source_type`) — 화면·서버 중복 정의 통합 | **신규** |
+| 파일 | 작업 | 변경 내용 |
+|---|---|---|
+| `app/api/chat/route.ts` | ①②③ | 30건 검색 → `rerank()` 상위 8건 → 평균·기준치 분기 → `source_type` 부여 + **stage 이벤트 송출 · 중단(AbortSignal) 대응** |
+| `lib/db/search.ts` | ① | `regulationSearch` 를 30건(`RETRIEVAL_TOP_K`)으로 호출 |
+| `lib/ai/rerank.ts` | ① | Cohere Rerank — 이미 완성, 호출만 연결 |
+| `lib/env.ts` | ③ | `RELEVANCE_THRESHOLD`(0.7) 신규 추가 |
+| `lib/ai/llm-router.ts` | ③ | `ragChatStream` 에 `lawContext` 주입 경로 연결 |
+| `lib/ai/prompts.ts` | ③ | 근거 출처를 내부규정/법령으로 구분 표기하도록 프롬프트 보강 |
+| `lib/law/` | ③ | 법령 조회·인용 검증 도구 (신규, 현재 비어 있음) |
+| `app/page.tsx` | ② | 복사·예시칩·출처 뱃지 + **근거 클릭 시 우측 패널/바텀시트** + 인라인 인용 마커 + **생성 중단 · 맨 아래로 · 진행 상태 표시** + 공용 타입 사용 |
+| `components/ui/response.tsx` | ② | 답변 렌더에 복사 버튼 연동 |
+| `components/ui/source-panel.tsx` | ② | **우측 근거 패널 + 모바일 바텀시트 + 정보원 타입별 카드**(📘/⚖️) (신규) |
+| `lib/types.ts` | ② | **공용 타입**(`Message`·`SourceChunk`·`StreamEvent`·`source_type`) — 화면·서버 중복 정의 통합 (신규) |
 
 > 손대지 않는 것: `lib/ai/embedding.ts`(임베딩 OpenAI 고정), `hybrid_search`/`documents` 경로(이번 회차 범위 밖), 마이그레이션(`supabase/migrations/`). 출처 뱃지·패널을 위해 추가하는 `source_type` 필드는 **공용 타입(`lib/types.ts`)에 한 번만** 정의해 화면·서버가 함께 쓰므로, 양쪽을 따로 고치다 어긋날 일이 없다. 우측 패널/바텀시트는 새 컴포넌트(`source-panel.tsx`)로 분리하면 기존 채팅 동작에 영향이 적다.
 
