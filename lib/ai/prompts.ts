@@ -1,23 +1,46 @@
-export const CHAT_SYSTEM_PROMPT = `당신은 ICT기금 사용자를 돕는 친절한 AI 어시스턴트입니다.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
-[원칙]
-- 사용자의 질문에 정확하고 명료하게 답합니다.
-- 모르는 사실은 추측하지 않고 모른다고 말합니다.
-- 답변은 한국어로 합니다(사용자가 다른 언어로 묻지 않는 한).
-- 코드는 마크다운 코드블록(\`\`\`)으로, 목록은 불릿/번호 매김으로 정돈해서 보여줍니다.`;
+/**
+ * 시스템 프롬프트는 `prompts/prompts.md` 단일 파일로 관리한다(비개발자도 편집 가능).
+ * 섹션은 `<!-- prompt:키 -->` 마커로 구분 — 마크다운에서 렌더되지 않고 본문과
+ * 충돌하지 않는다. 모듈 로드 시 1회 파싱해 상수로 노출하므로 소비처(llm-router)
+ * 인터페이스는 불변. 경로가 동적이라 next.config.ts의 `outputFileTracingIncludes`로
+ * prompts/** 번들 동봉을 보장한다.
+ */
+function loadPrompts(): Record<string, string> {
+  const path = join(process.cwd(), "prompts", "prompts.md");
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (err) {
+    throw new Error(
+      `시스템 프롬프트 로드 실패: ${path} (${(err as Error).message})`,
+    );
+  }
 
-export const RELEVANCE_GATE_PROMPT = `당신은 검색 결과 적합성 판정기입니다. 사용자 질문과 내부 규정 발췌가 주어지면, 그 발췌만으로 질문의 핵심에 답할 근거가 있는지 판단합니다. 근거가 충분하면 "YES", 핵심 근거가 없으면 "NO"만 출력합니다. 다른 말은 절대 하지 않습니다.`;
+  const sections: Record<string, string> = {};
+  const marker = /<!--\s*prompt:([\w-]+)\s*-->/g;
+  const matches = [...raw.matchAll(marker)];
+  for (let i = 0; i < matches.length; i++) {
+    const key = matches[i][1];
+    const start = matches[i].index + matches[i][0].length;
+    const end = i + 1 < matches.length ? matches[i + 1].index : raw.length;
+    sections[key] = raw.slice(start, end).trim();
+  }
+  return sections;
+}
 
-export const SYSTEM_PROMPT = `당신은 ICT기금 규정·법령 어드바이저입니다.
+function requireSection(sections: Record<string, string>, key: string): string {
+  const text = sections[key];
+  if (!text) {
+    throw new Error(`시스템 프롬프트 섹션 누락: prompts/prompts.md <!-- prompt:${key} -->`);
+  }
+  return text;
+}
 
-[원칙]
-- 제공된 <context> 안의 내부 규정·지침·해석사례, 그리고 법제처 API에서 가져온 법령·판례만 근거로 답변합니다.
-- 컨텍스트에 없는 사실은 추측하지 말고 "확인된 자료에 없습니다"라고 명시합니다.
-- 모든 인용에는 출처(법령명·조·항·내부문서번호 등)를 반드시 표기합니다.
-- 답변 끝에 "근거" 섹션을 두고 번호와 출처를 나열합니다.
+const PROMPTS = loadPrompts();
 
-[답변 형식]
-1. 결론 (2~3줄)
-2. 적용되는 조항·규정 요약 (인용 포함)
-3. 적용 시 유의사항 (있을 경우)
-4. 근거 목록`;
+export const SYSTEM_PROMPT = requireSection(PROMPTS, "advisor");
+export const CHAT_SYSTEM_PROMPT = requireSection(PROMPTS, "chat");
+export const RELEVANCE_GATE_PROMPT = requireSection(PROMPTS, "relevance-gate");

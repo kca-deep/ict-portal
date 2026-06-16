@@ -8,6 +8,13 @@ import {
 import { regulationSearch, type DocumentHit } from "@/lib/db/search";
 import { rerank } from "@/lib/ai/rerank";
 import { searchLaw } from "@/lib/law/search";
+import {
+  searchDecisions,
+  getDecisionText,
+  type DecisionRef,
+  type DecisionText,
+  type DecisionDomain,
+} from "@/lib/law/decisions";
 import { verifyCitations, type CitationVerdict } from "@/lib/law/verify";
 import { env } from "@/lib/env";
 
@@ -73,6 +80,52 @@ async function topRerankedSources(
       .slice(0, env.RERANK_TOP_K)
       .map((h) => toSource(h, h.rrf_score));
   }
+}
+
+const DECISION_LABEL: Record<DecisionDomain, string> = {
+  prec: "판례",
+  detc: "헌재결정",
+};
+
+// 판례 본문을 참조문서 패널용 SourceChunk 로 변환 (kind=precedent).
+function toPrecedentSource(
+  r: DecisionRef,
+  t: DecisionText,
+  i: number,
+): SourceChunk {
+  const parts = [
+    t.summary && `[판시사항] ${t.summary}`,
+    t.holding && `[판결요지] ${t.holding}`,
+    t.refStatutes && `[참조조문] ${t.refStatutes}`,
+  ].filter(Boolean) as string[];
+  return {
+    // 법령 소스(-(i+1))와 겹치지 않는 별도 음수 대역.
+    id: -(100 + i),
+    title: `${r.caseName}${r.caseNo ? ` (${r.caseNo})` : ""}`,
+    source_ref: `법제처 ${DECISION_LABEL[r.domain]} · ${r.court}${r.date ? ` ${r.date}` : ""} · 일련번호 ${r.serial}`,
+    content: parts.length > 0 ? parts.join("\n\n") : r.caseName,
+    metadata: { kind: "precedent", serial: r.serial, domain: r.domain },
+    score: 0,
+  };
+}
+
+// 판례 발췌를 LLM <context> 주입용 텍스트로 구성.
+function buildPrecedentContext(
+  refs: DecisionRef[],
+  texts: DecisionText[],
+): string {
+  const lines = refs.map((r, i) => {
+    const t = texts[i] ?? {};
+    const head = `${i + 1}. ${r.caseName}${r.caseNo ? ` (${r.caseNo})` : ""} — ${r.court}${r.date ? ` ${r.date}` : ""}`;
+    const body = [
+      t.summary && `판시사항: ${t.summary}`,
+      t.holding && `판결요지: ${t.holding}`,
+    ]
+      .filter(Boolean)
+      .join("\n   ");
+    return body ? `${head}\n   ${body}` : head;
+  });
+  return `[관련 판례]\n${lines.join("\n")}`;
 }
 
 function isValidMessages(value: unknown): value is ChatMessage[] {
@@ -143,8 +196,13 @@ export async function POST(req: NextRequest) {
 
         let lawContext: string | undefined;
         let lawSources: SourceChunk[] = [];
+        let precedentSources: SourceChunk[] = [];
         if (routedToLaw) {
-          const law = await searchLaw(query);
+          // 법령과 판례를 동시 조회 (둘 다 법제처 — 병렬로 응답 전 지연 최소화).
+          const [law, precRefs] = await Promise.all([
+            searchLaw(query),
+            searchDecisions(query, "prec", 2),
+          ]);
           if (law.context) lawContext = law.context;
           // 법령을 참조문서로 변환 — 1위 법령엔 발췌 조문 본문, 나머지는 메타 요약.
           lawSources = law.refs.map((r, i) => ({
@@ -158,6 +216,18 @@ export async function POST(req: NextRequest) {
             metadata: { kind: "law", lawId: r.lawId },
             score: 0,
           }));
+
+          // 상위 판례 본문을 회수해 참조문서 + 컨텍스트로 보강 (best-effort).
+          if (precRefs.length > 0) {
+            const texts = await Promise.all(
+              precRefs.map((r) => getDecisionText(r.serial, r.domain)),
+            );
+            precedentSources = precRefs.map((r, i) =>
+              toPrecedentSource(r, texts[i], i),
+            );
+            const precBlock = buildPrecedentContext(precRefs, texts);
+            lawContext = [lawContext, precBlock].filter(Boolean).join("\n\n");
+          }
         }
         const lawRefs = lawSources.map((s) => ({
           name: s.title ?? "",
@@ -180,7 +250,9 @@ export async function POST(req: NextRequest) {
 
         // 6) 답변 완료 후 라우팅·참조문서를 전송 (UI: 답변 아래에 참조 패널 노출).
         //    법령 분기면 실제 근거인 법령을, 규정 분기면 규정 청크를 참조문서로 표시.
-        const displayedSources = routedToLaw ? lawSources : sources;
+        const displayedSources = routedToLaw
+          ? [...lawSources, ...precedentSources]
+          : sources;
         send(
           controller,
           routedToLaw

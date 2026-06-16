@@ -1,6 +1,6 @@
 # 보안 · 운영 · 비용
 
-> **한 줄 요약**: 이 서비스는 **ICT기금 외부 기관 담당자**만 쓰는 비공개 서비스입니다. 모든 외부 API 호출은 서버(Vercel 함수)에서만 일어나고, 채팅은 로그인한 사람만 쓸 수 있으며, 색인 기능은 외부 사용자에게 절대 열지 않습니다. 임베딩은 OpenAI, 재정렬은 Cohere, 답변 생성은 Anthropic Claude, 법령 조회는 법제처(korean-law MCP)를 씁니다.
+> **한 줄 요약**: 이 서비스는 **ICT기금 외부 기관 담당자**만 쓰는 비공개 서비스입니다. 모든 외부 API 호출은 서버(Vercel 함수)에서만 일어나고, 채팅은 로그인한 사람만 쓸 수 있으며, 색인 기능은 외부 사용자에게 절대 열지 않습니다. 임베딩은 OpenAI, 재정렬은 Cohere, 답변 생성은 Anthropic Claude, 법령 조회는 법제처 OpenAPI를 직접 호출하는 자체 구현 도구(`lib/law/`)를 씁니다.
 
 ---
 
@@ -10,7 +10,7 @@
 - **재정렬(rerank)**: 1차로 찾은 후보 문서들을 질문에 더 잘 맞는 순서로 다시 줄 세우는 단계.
 - **RLS(Row Level Security)**: 데이터베이스가 "이 사람은 이 행만 볼 수 있다"를 행 단위로 강제하는 기능.
 - **레이트리밋(rate limit)**: 일정 시간에 허용하는 요청 횟수 상한.
-- **MCP**: 외부 도구·데이터(여기서는 법제처 법령 API)를 표준 방식으로 호출하게 해 주는 연동 규격.
+- **법령 도구**: 법제처 국가법령정보 공동활용 OpenAPI를 직접 호출하는 자체 구현 도구(`lib/law/`). 개발 환경의 korean-law MCP는 Vercel 서버리스에 상주할 수 없어 동일 기능을 자체 함수로 구현했고, 질의는 제3자 MCP 경유 없이 법제처로만 나간다(보안상 경로가 단순).
 
 ---
 
@@ -49,9 +49,9 @@
                ▼          ▼          ▼          ▼
       ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────────┐
       │ Supabase │ │ OpenAI   │ │  Cohere  │ │  법제처      │
-      │ Postgres │ │ 임베딩    │ │ 재정렬    │ │ korean-law  │
-      │  (RLS)   │ │(3-small) │ │(rerank   │ │   MCP        │
-      │          │ │ 1024차원  │ │ -v4.0)   │ │             │
+      │ Postgres │ │ 임베딩    │ │ 재정렬    │ │ OpenAPI     │
+      │  (RLS)   │ │(3-small) │ │(rerank   │ │ 직접호출    │
+      │          │ │ 1024차원  │ │ -v4.0)   │ │ (자체구현)  │
       └──────────┘ └──────────┘ └──────────┘ └─────────────┘
                         │
                         ▼  (답변 생성)
@@ -70,7 +70,7 @@
 | `OPENAI_API_KEY` | **임베딩** (`text-embedding-3-small`, 1024차원) |
 | `COHERE_API_KEY` | **재정렬** (`rerank-v3.5`) |
 | `ANTHROPIC_API_KEY` | 답변 **LLM** (`claude-sonnet-4-6`) |
-| `LAW_GO_KR_API_KEY` | 법제처 법령 API (korean-law MCP) |
+| `LAW_GO_KR_API_KEY` | 법제처 OpenAPI(OC 인증값) — 자체 구현 법령 도구 `lib/law/` 직접 호출 |
 
 ---
 
@@ -217,7 +217,7 @@ create policy "query_log_admin" on public.query_log
 | Anthropic Claude `sonnet-4-6` | $3/M input, $15/M output | $30~60 |
 | **OpenAI 임베딩** (`text-embedding-3-small`, 초기 1회 100K 청크) | $0.02/M tokens | 초기 약 $2, 운영 미미 |
 | Cohere 재정렬 (`rerank-v3.5`, 3K queries) | 쿼리 단가 | $5~10 |
-| 법제처 API (korean-law MCP) | 무료 | $0 |
+| 법제처 OpenAPI (자체 구현 도구 직접 호출) | 무료 | $0 |
 | **합계 (운영 정상화 후)** | | **약 $80~120/월** |
 
 PoC 단계는 사용량이 적어 무료 티어 + Pro 구독 비용 정도.

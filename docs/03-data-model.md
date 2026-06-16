@@ -23,7 +23,7 @@
 | `documents` | 내부 규정·지침·해석사례를 잘게 나눈 글 조각 + 임베딩(OpenAI 1024차원) | ① 어드바이저 |
 | `regulation` | 내부 규정 텍스트 + 임베딩(OpenAI 1024차원). `documents`와 **동일한 스키마** | ① 어드바이저 |
 | `query_log` | 사용자 질문·답변과 처리 메트릭 로그. **관리자 통계·세부 조회의 원천** | ① + 로그분석 |
-| `law_cache` | 법령(korean-law MCP) 응답을 잠시 저장하는 캐시 | ① 어드바이저 |
+| `law_cache` | 법령(법제처 OpenAPI 직접 호출, 자체 구현 도구) 응답을 잠시 저장하는 캐시 | ① 어드바이저 |
 | `announcements` | 크롤링한 공모사업 공고 정보 | ② 파이프라인 |
 | `crawler_sources` | 크롤링 대상 사이트 목록 + 추출 규칙 | ② 파이프라인 |
 | `crawl_runs` | 크롤링 실행 이력 | ② 파이프라인 |
@@ -97,9 +97,9 @@ user_id             uuid         auth.users 참조 (질문한 사용자)
 query               text         사용자 질문
 answer              text         시스템 답변
 retrieved_doc_ids   bigint[]     답변에 사용한 문서 id 목록
-cited_law_refs      jsonb        인용한 법령 목록 (korean-law MCP 기준)
+cited_law_refs      jsonb        인용한 법령 목록 (법제처 OpenAPI / 자체 구현 법령 도구 기준)
                                  [{"law":"근로기준법","article":"제53조","date":"2024-05-17"}, ...]
-citation_verified   boolean      인용 검증(verify_citations, korean-law MCP) 통과 여부
+citation_verified   boolean      인용 검증(verify_citations, 자체 구현 법령 도구) 통과 여부
 llm_model           text         사용한 LLM 모델명
 retrieval_ms        int          검색에 걸린 시간(ms)
 rerank_ms           int          재정렬에 걸린 시간(ms)
@@ -127,18 +127,18 @@ INSERT: service_role (백엔드에서만 기록)
 
 ### `law_cache`
 
-**무엇을 담나**: 법령 조회(korean-law MCP) 결과를 잠시 저장해, 같은 질문에 매번 외부를 다시 부르지 않도록 하는 캐시입니다.
+**무엇을 담나**: 법령 조회(법제처 OpenAPI를 직접 호출하는 자체 구현 도구 `lib/law/`) 결과를 잠시 저장해, 같은 질문에 매번 외부를 다시 부르지 않도록 하는 캐시입니다.
 
 ```
 컬럼          타입                  설명
 ─────────────────────────────────────────────────────
 cache_key   text PK              'search_law:근로기준법:제53조'
-tool_name   text not null        호출한 korean-law MCP 도구명 (예: search_law, get_law_text, verify_citations)
+tool_name   text not null        호출한 법령 도구명 (자체 구현, 예: search_law, get_law_text, verify_citations)
 payload     jsonb not null       응답 결과 원본
 ttl_at      timestamptz not null 이 시각 이후 만료(폐기)
 created_at  timestamptz default now()
 
-용도: korean-law MCP 응답 + 인용 검증(verify_citations) 결과 캐시 (기본 TTL 24시간)
+용도: 법제처 OpenAPI 응답(자체 구현 법령 도구) + 인용 검증(verify_citations) 결과 캐시 (기본 TTL 24시간)
 ```
 
 ## 4. ② 크롤러 테이블

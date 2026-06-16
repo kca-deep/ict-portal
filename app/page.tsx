@@ -2,15 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Response } from "@/components/ui/response";
-
-type SourceChunk = {
-  id: number;
-  title: string | null;
-  source_ref: string | null;
-  content: string;
-  metadata: Record<string, unknown>;
-  score: number;
-};
+import {
+  SourcePanel,
+  relevancePercent,
+  type SourceChunk,
+} from "@/components/ui/source-panel";
 
 type Message = {
   role: "user" | "assistant";
@@ -29,6 +25,11 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 우측 근거 패널에 띄울 참조 문서(없으면 닫힘). 한 번에 하나만 연다.
+  const [activeSource, setActiveSource] = useState<{
+    source: SourceChunk;
+    index: number;
+  } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // 사용자가 맨 아래 근처에 있을 때만 자동 스크롤. 위로 올리면 스트리밍 중에도 따라가지 않음.
@@ -80,6 +81,16 @@ export default function Home() {
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight });
   }, [messages]);
+
+  // Esc로 근거 패널 닫기.
+  useEffect(() => {
+    if (!activeSource) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setActiveSource(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeSource]);
 
   async function send() {
     const text = input.trim();
@@ -174,11 +185,17 @@ export default function Home() {
     if (loading) return;
     setMessages([]);
     setError(null);
+    setActiveSource(null);
   }
 
   return (
     <main className="flex h-screen bg-background">
-      <div className="flex flex-col w-full max-w-3xl mx-auto h-full">
+      <div className="flex-1 flex flex-col h-full min-w-0">
+        <div
+          className={`flex flex-col w-full h-full ${
+            activeSource ? "" : "max-w-3xl mx-auto"
+          }`}
+        >
         {/* Header */}
         <header className="flex items-center justify-between px-6 py-4 shrink-0">
           <div className="flex items-center gap-3">
@@ -248,7 +265,13 @@ export default function Home() {
                     )}
                   </div>
                   {m.sources && m.sources.length > 0 && (
-                    <Sources sources={m.sources} />
+                    <Sources
+                      sources={m.sources}
+                      active={activeSource?.source ?? null}
+                      onOpen={(source, index) =>
+                        setActiveSource({ source, index })
+                      }
+                    />
                   )}
                 </div>
               </div>
@@ -284,7 +307,16 @@ export default function Home() {
             </button>
           </div>
         </div>
+        </div>
       </div>
+
+      {activeSource && (
+        <SourcePanel
+          source={activeSource.source}
+          index={activeSource.index}
+          onClose={() => setActiveSource(null)}
+        />
+      )}
     </main>
   );
 }
@@ -312,7 +344,15 @@ function plainPreview(md: string): string {
     .trim();
 }
 
-function Sources({ sources }: { sources: SourceChunk[] }) {
+function Sources({
+  sources,
+  active,
+  onOpen,
+}: {
+  sources: SourceChunk[];
+  active: SourceChunk | null;
+  onOpen: (source: SourceChunk, index: number) => void;
+}) {
   return (
     <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm overflow-hidden">
       <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
@@ -320,30 +360,45 @@ function Sources({ sources }: { sources: SourceChunk[] }) {
       </div>
       <ol className="divide-y divide-border">
         {sources.map((s, i) => (
-          <SourceItem key={s.id} index={i} source={s} />
+          <SourceItem
+            key={s.id}
+            index={i}
+            source={s}
+            active={active === s}
+            onOpen={() => onOpen(s, i)}
+          />
         ))}
       </ol>
     </div>
   );
 }
 
-// Cohere relevanceScore(0~1)를 관련도 %로 변환. 0~100 범위로 안전하게 클램프.
-function relevancePercent(score: number): number {
-  return Math.max(0, Math.min(100, Math.round(score * 100)));
-}
-
-function SourceItem({ index, source }: { index: number; source: SourceChunk }) {
-  const [open, setOpen] = useState(false);
+function SourceItem({
+  index,
+  source,
+  active,
+  onOpen,
+}: {
+  index: number;
+  source: SourceChunk;
+  active: boolean;
+  onOpen: () => void;
+}) {
   const article = (source.metadata?.article as string | undefined) ?? null;
-  const isLaw = source.metadata?.kind === "law";
+  const kind = source.metadata?.kind;
+  const isLaw = kind === "law";
+  const isPrecedent = kind === "precedent";
   const percent = relevancePercent(source.score);
 
   return (
     <li className="text-xs">
       <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-start gap-2 px-3 py-2 text-left hover:bg-muted/40 transition-colors"
-        aria-expanded={open}
+        onClick={onOpen}
+        className={`w-full flex items-start gap-2 px-3 py-2 text-left transition-colors ${
+          active ? "bg-primary/10" : "hover:bg-muted/40"
+        }`}
+        aria-pressed={active}
+        title="누르면 오른쪽 패널에서 원문을 봅니다"
       >
         <span className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-md bg-primary/15 text-primary font-semibold text-[10px]">
           {index + 1}
@@ -357,11 +412,9 @@ function SourceItem({ index, source }: { index: number; source: SourceChunk }) {
               <span className="text-[10px] text-muted-foreground">{article}</span>
             )}
           </span>
-          {!open && (
-            <span className="block truncate text-muted-foreground/80">
-              {plainPreview(source.content)}
-            </span>
-          )}
+          <span className="block truncate text-muted-foreground/80">
+            {plainPreview(source.content)}
+          </span>
         </span>
         {isLaw ? (
           <span
@@ -369,6 +422,13 @@ function SourceItem({ index, source }: { index: number; source: SourceChunk }) {
             title="법제처 국가법령정보"
           >
             법제처 법령
+          </span>
+        ) : isPrecedent ? (
+          <span
+            className="shrink-0 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary mt-0.5"
+            title="법제처 판례·헌재결정"
+          >
+            판례
           </span>
         ) : (
           <span
@@ -378,20 +438,10 @@ function SourceItem({ index, source }: { index: number; source: SourceChunk }) {
             {percent}% 관련도
           </span>
         )}
-        <span className="shrink-0 text-[10px] text-muted-foreground/70 mt-0.5">
-          {open ? "▾" : "▸"}
+        <span className="shrink-0 text-[10px] text-muted-foreground/70 mt-0.5" aria-hidden>
+          ↗
         </span>
       </button>
-      {open && (
-        <div className="px-3 pb-3 text-muted-foreground">
-          <Response>{source.content}</Response>
-          {source.source_ref && (
-            <p className="mt-2 text-[10px] text-muted-foreground/70">
-              출처: {source.source_ref}
-            </p>
-          )}
-        </div>
-      )}
     </li>
   );
 }

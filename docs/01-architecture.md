@@ -6,7 +6,7 @@
 > - **RAG**: 질문과 관련된 문서를 먼저 찾아(검색) 그 내용을 근거로 LLM이 답을 만드는 방식.
 > - **임베딩**: 문장을 숫자 벡터로 바꿔 의미가 비슷한 문서를 찾을 수 있게 하는 변환.
 > - **재정렬(Rerank)**: 1차로 찾은 후보들을 질문과의 적합도 순으로 다시 줄 세우는 단계.
-> - **MCP**: 외부 도구(예: 법령 검색)를 LLM이 호출할 수 있게 표준화한 연결 규격.
+> - **법령 도구**: 법제처 국가법령정보 공동활용 OpenAPI를 직접 호출하는 자체 구현 도구(`lib/law/`). 법령 검색·조문 원문·인용 검증을 수행한다.
 
 ---
 
@@ -38,7 +38,7 @@
 │  ┌────────────────────────────────────────────────────┐   │
 │  │ lib/                                               │   │
 │  │  ├─ ai/      OpenAI(임베딩)·Cohere(재정렬)·Claude  │   │
-│  │  ├─ law/     korean-law MCP (법제처) 연동          │   │
+│  │  ├─ law/     법제처 OpenAPI 직접 호출 (자체 구현)   │   │
 │  │  ├─ crawler/ 공모 크롤러                          │   │
 │  │  ├─ ocr/     PDF·이미지 표준화 (③용)             │   │
 │  │  └─ db/      Supabase 클라이언트                  │   │
@@ -54,8 +54,10 @@
  │ + Auth   ││ 1024차원 ││          ││                 │
  └──────────┘└──────────┘└──────────┘└─────────────────┘
                                      ┌──────────────────────┐
-                                     │ korean-law MCP       │
-                                     │ (법제처·법령/판례)   │
+                                     │ 법제처 OpenAPI       │
+                                     │ (국가법령정보 직접   │
+                                     │  호출·자체 구현)     │
+                                     │  법령/판례           │
                                      └──────────────────────┘
                                      ┌──────────────────────┐
                                      │ 유관기관 공고 사이트 │
@@ -65,7 +67,7 @@
 
 - **임베딩(색인+쿼리)**: OpenAI `text-embedding-3-small` (1024차원). 한 번 정한 모델을 영구 유지하며, 교체나 전체 재색인은 하지 않습니다.
 - **재정렬**: Cohere `rerank-v3.5`. 검색이 끝난 뒤 별도로 도는 단계이며, 임베딩과는 무관합니다.
-- **법령**: korean-law MCP(법제처)를 통해 조회합니다.
+- **법령**: 법제처 국가법령정보 공동활용 OpenAPI를 직접 호출하는 자체 구현 도구(`lib/law/`)로 조회합니다.
 - **답변 LLM**: Anthropic Claude `claude-sonnet-4-6`. 스트리밍과 프롬프트 캐싱을 사용합니다.
 
 ---
@@ -83,7 +85,7 @@
 | 임베딩 | **OpenAI `text-embedding-3-small` (1024차원)** | Cohere embed, OpenAI 3-large | 색인·쿼리 동일 모델로 영구 유지, 1024차원으로 pgvector 효율, 안정적 운영 |
 | 리랭킹(재정렬) | **Cohere `rerank-v3.5` multilingual** | Voyage Rerank 2.5, Jina v2 | 한국어 포함 다국어 지원, 검색 후 적합도 재정렬에 특화 |
 | 답변 LLM | **Claude `claude-sonnet-4-6` 단독** | GPT-5.5, Opus 듀얼 | 긴 컨텍스트, 스트리밍·프롬프트 캐싱 지원, Opus 대비 저렴. 평가 후 필요시 Opus 라우팅 추가 |
-| 법령 도구 | **korean-law MCP (법제처)** | 자체 Tool Use 구현 | 법제처 공식 데이터 기반, 실시간 조회, 인용 검증(verify_citations) 제공. 표준 MCP라 도구 추가·교체 용이 |
+| 법령 도구 | **법제처 OpenAPI 직접 호출 (자체 구현 도구 `lib/law/`)** | korean-law MCP 런타임 연결 | korean-law MCP는 개발 환경 도구라 Vercel 서버리스에 상주 불가 → 동일 기능을 `lib/law`에 자체 함수로 구현. 법제처 공식 데이터, 실시간 조회, 인용 검증(verify_citations), `law_cache` 캐싱 |
 | 크롤링 | **fetch + cheerio** | Playwright | 정적 HTML 위주. JS 렌더링 필요 사이트만 외부 스크래핑 API 도입 검토 |
 | 한국어 형태소 | **PostgreSQL `simple` config** | pg_bigm, mecab-ko | 1차 PoC는 simple. 평가 결과 부족하면 pg_bigm 추가 |
 | 인증 | **Supabase Auth (로그인 필수)** | NextAuth, Clerk | RLS와 일관, 공개 가입 차단·초대/승인 운영 가능, 추가 인프라 불필요 |
@@ -100,7 +102,7 @@
 | **OpenAI** | **임베딩** (색인+쿼리, `text-embedding-3-small`) | 토큰 종량 | `OPENAI_API_KEY` |
 | **Cohere** | **재정렬** (`rerank-v3.5`) | 토큰 종량 | `COHERE_API_KEY` |
 | **Anthropic** | 답변 LLM (`claude-sonnet-4-6`) | 토큰 종량 | `ANTHROPIC_API_KEY` |
-| **법제처** | korean-law MCP — 법령·판례 조회 | 무료 (호출 한도 있음) | `LAW_GO_KR_API_KEY` |
+| **법제처** | 국가법령정보 공동활용 OpenAPI 직접 호출(자체 구현 도구 `lib/law/`) — 법령·판례 조회 | 무료 (호출 한도 있음) | `LAW_GO_KR_API_KEY` |
 
 ### 서버 환경변수 키 목록
 
@@ -112,7 +114,7 @@
 | `OPENAI_API_KEY` | OpenAI 임베딩 호출 |
 | `COHERE_API_KEY` | Cohere 재정렬 호출 |
 | `ANTHROPIC_API_KEY` | Claude 답변 생성 |
-| `LAW_GO_KR_API_KEY` | 법제처(korean-law MCP) 조회 |
+| `LAW_GO_KR_API_KEY` | 법제처 OpenAPI(OC 인증값) — 자체 구현 법령 도구 `lib/law/` 조회 |
 
 ---
 
@@ -135,7 +137,7 @@
 │    · 상위 결과 관련도 점수 ≥ 기준치                         │
 │        → 내부 규정만 근거로 사용                            │
 │    · 기준치 미만                                            │
-│        → korean-law MCP로 법령 조회 → 인용 검증            │
+│        → 법제처 OpenAPI로 법령 조회 → 인용 검증           │
 │          (verify_citations)                                  │
 │ 6. Claude claude-sonnet-4-6가 근거를 바탕으로               │
 │    최종 답변 생성 (스트리밍 + 프롬프트 캐싱)               │

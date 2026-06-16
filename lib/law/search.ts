@@ -1,8 +1,18 @@
 import { env } from "@/lib/env";
 import { expandLawAbbreviation } from "@/lib/law/abbreviations";
+import { buildSearchUrl, buildServiceUrl } from "@/lib/law/client";
+import { cachedGetJson } from "@/lib/law/cache";
+
+// 캐시 TTL: 법령 목록 6h, 법령 본문(조문)은 변동이 드물어 24h.
+const TTL_SEARCH = 6 * 3600;
+const TTL_TEXT = 24 * 3600;
 
 /**
- * 법제처 국가법령정보 공동활용 OpenAPI 조회.
+ * search_law / get_law_text — 법령 검색·조문 회수 (법제처 DRF target=law).
+ *
+ * korean-law MCP 의 동명 도구를 우리 코드로 자체 구현. 전송(transport)은
+ * lib/law/client.ts 가 담당하고, 이 파일은 법령 도메인 로직(법령명 추출·조문
+ * 발췌·매칭)만 다룬다.
  *
  * 어드바이저 ①의 관련도 분기에서 내부 규정 관련도가 기준치(RELEVANCE_THRESHOLD)
  * 미만일 때 호출된다. 자연어 질의를 그대로 넘기면 법제처는 0건을 반환하므로
@@ -12,15 +22,12 @@ import { expandLawAbbreviation } from "@/lib/law/abbreviations";
  * (route 가 법령 없이도 내부 규정만으로 계속 진행할 수 있어야 한다.)
  */
 
-export const SEARCH_URL =
-  env.LAW_GO_KR_BASE_URL ?? "https://www.law.go.kr/DRF/lawSearch.do";
-export const SERVICE_URL = SEARCH_URL.replace("lawSearch.do", "lawService.do");
-
 export type LawRef = {
   name: string; // 법령명한글
   lawId: string; // 법령ID
   promulgated: string; // 공포일자(YYYYMMDD)
   ministry?: string; // 소관부처명
+  status?: string; // 현행연혁코드 ("현행" / "연혁")
 };
 
 export type LawLookup = {
@@ -67,30 +74,17 @@ function flatten(v: unknown): string {
   return String(v);
 }
 
-export async function getJson(url: string): Promise<any | null> {
-  try {
-    const res = await fetch(url, { headers: { Accept: "application/json" } });
-    if (!res.ok) return null;
-    return JSON.parse(await res.text());
-  } catch {
-    return null;
-  }
-}
-
 // lawSearch.do — 법령명으로 목록 조회.
 export async function searchByName(
   oc: string,
   term: string,
   display: number,
 ): Promise<LawRef[]> {
-  const qs = new URLSearchParams({
-    OC: oc,
-    target: "law",
-    type: "JSON",
-    query: term,
-    display: String(display),
-  }).toString();
-  const json = await getJson(`${SEARCH_URL}?${qs}`);
+  const json = (await cachedGetJson(
+    buildSearchUrl({ oc, target: "law", query: term, display }),
+    "search_law",
+    TTL_SEARCH,
+  )) as any;
   if (!json) return [];
   const root = json.LawSearch ?? Object.values(json)[0];
   const list = root?.law ?? [];
@@ -101,6 +95,7 @@ export async function searchByName(
       lawId: String(it["법령ID"] ?? ""),
       promulgated: String(it["공포일자"] ?? ""),
       ministry: it["소관부처명"] ? String(it["소관부처명"]) : undefined,
+      status: it["현행연혁코드"] ? String(it["현행연혁코드"]).trim() : undefined,
     }))
     .filter((r: LawRef) => r.lawId);
 }
@@ -113,13 +108,11 @@ async function fetchArticles(
   maxArticles = 8,
   maxChars = 600,
 ): Promise<string[]> {
-  const qs = new URLSearchParams({
-    OC: oc,
-    target: "law",
-    type: "JSON",
-    ID: lawId,
-  }).toString();
-  const json = await getJson(`${SERVICE_URL}?${qs}`);
+  const json = (await cachedGetJson(
+    buildServiceUrl({ oc, target: "law", id: lawId }),
+    "get_law_text",
+    TTL_TEXT,
+  )) as any;
   if (!json) return [];
   const law = json.법령 ?? json.Law ?? Object.values(json)[0];
   const root = law?.조문?.조문단위 ?? law?.조문;
@@ -152,13 +145,11 @@ export async function fetchArticleNumbers(
   oc: string,
   lawId: string,
 ): Promise<Set<string>> {
-  const qs = new URLSearchParams({
-    OC: oc,
-    target: "law",
-    type: "JSON",
-    ID: lawId,
-  }).toString();
-  const json = await getJson(`${SERVICE_URL}?${qs}`);
+  const json = (await cachedGetJson(
+    buildServiceUrl({ oc, target: "law", id: lawId }),
+    "get_law_text",
+    TTL_TEXT,
+  )) as any;
   const set = new Set<string>();
   if (!json) return set;
   const law = json.법령 ?? json.Law ?? Object.values(json)[0];

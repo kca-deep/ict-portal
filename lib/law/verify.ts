@@ -10,8 +10,9 @@ import { expandLawAbbreviation } from "@/lib/law/abbreviations";
  * 인용 검증 — LLM 답변의 조문 인용이 법제처 DB에 실존하는지 교차 검증한다.
  *
  * 법령 분기 답변에서 Claude 가 "○○법 제N조" 형태로 근거를 인용할 때, 존재하지
- * 않는 조문(환각)을 잡아낸다. korean-law MCP 의 verify_citations 핵심 로직만 추려
- * 무의존성으로 직접 구현. 모든 외부 호출은 best-effort — 실패해도 예외를 던지지 않는다.
+ * 않는 조문(환각)을 잡아낸다. 추가로 조문이 실존하더라도 현행이 아닌(연혁·폐지)
+ * 법령이면 currency 경고를 단다. korean-law MCP 의 legal_analysis(verify_citations)
+ * 기능을 우리 코드로 자체 구현. 모든 외부 호출은 best-effort — 예외를 던지지 않는다.
  */
 
 export type CitationStatus = "verified" | "not_found" | "ambiguous";
@@ -116,7 +117,16 @@ export async function verifyCitations(
           };
         }
         if (articles.has(c.article)) {
-          return { ...c, lawName: ref.name, status: "verified" };
+          // 조문은 실존. 다만 현행이 아닌(연혁/폐지) 법령이면 currency 경고를 단다.
+          const stale = Boolean(ref.status) && !ref.status!.includes("현행");
+          return {
+            ...c,
+            lawName: ref.name,
+            status: "verified",
+            note: stale
+              ? `연혁·폐지 법령일 수 있음 (현행연혁: ${ref.status}) — 현행 여부 확인 필요`
+              : undefined,
+          };
         }
         // 법령은 존재하나 해당 조문이 없음 → 환각 가능성.
         return {

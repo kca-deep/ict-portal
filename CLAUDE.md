@@ -22,7 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Anthropic Claude Sonnet 4.6 (답변 LLM, 단독, 1M context)
 - **임베딩: OpenAI `text-embedding-3-small` (1024d, 색인=쿼리 동일, 영구 고정 — 교체·재색인 없음)**
 - **재정렬: Cohere `rerank-v3.5` (검색 뒤 별도 단계, 임베딩과 무관)**
-- **법령: korean-law MCP (법제처 법령·판례 실시간 조회 + 인용 검증)**
+- **법령: 법제처 OpenAPI 직접 호출 (자체 구현 도구 — 법령·판례 조회 + 인용 검증, `lib/law/`)**
 - Vercel Pro + Fluid Compute · Node 런타임 고정 (Edge 미사용)
 
 ## 명령어
@@ -44,7 +44,7 @@ pnpm db:reset     # DB 초기화
 
 진입점은 `app/api/*/route.ts`. 도메인 로직은 `lib/`에 모이고, App Router는 thin handler만.
 
-- `app/api/chat` → `lib/ai`(OpenAI 임베딩 · Cohere 재정렬 · Claude LLM) + `lib/db/search.ts`(hybrid_search / regulation_search RPC). 흐름: 내부 규정 검색 → Cohere Rerank → 관련도 분기(기준치 이상=내부 규정 근거 / 미만=korean-law MCP 법령 조회 + 인용 검증) → Claude 스트리밍. `query_log` 비동기 적재(관리자 로그 원천). ※ 오픈 전 하드닝 필요: 로그인 게이트·레이트리밋·에러 일반화(`docs/07` 참조).
+- `app/api/chat` → `lib/ai`(OpenAI 임베딩 · Cohere 재정렬 · Claude LLM) + `lib/db/search.ts`(hybrid_search / regulation_search RPC). 흐름: 내부 규정 검색 → Cohere Rerank → 관련도 분기(기준치 이상=내부 규정 근거 / 미만=법제처 OpenAPI 직접 호출로 법령·판례 조회 + 인용 검증) → Claude 스트리밍. `query_log` 비동기 적재(관리자 로그 원천). ※ 오픈 전 하드닝 필요: 로그인 게이트·레이트리밋·에러 일반화(`docs/07` 참조).
 - `app/api/ingest` → 64건 단위 배치 임베딩 후 `documents` 적재. ※ 외부 노출 금지 — 관리자 전용/스크립트 전용화 대상.
 - `app/api/cron/*` → Vercel Cron으로 ② 크롤러 / 법령 캐시 갱신.
 - `app/api/duplicate-check` → ③ 중복수혜 (placeholder, 선택 기능).
@@ -55,7 +55,7 @@ pnpm db:reset     # DB 초기화
 |---|---|
 | `lib/ai/` | OpenAI(임베딩) + Cohere(재정렬) + Anthropic(Claude) + 프롬프트. 답변 LLM은 Claude Sonnet 4.6 단독. |
 | `lib/db/` | Supabase admin/anon 클라이언트 + `hybrid_search` / `regulation_search` RPC 래퍼. |
-| `lib/law/` | 법제처 법령·판례 조회는 **korean-law MCP** 사용 + `law_cache` 캐싱. 인용 검증으로 환각 차단. |
+| `lib/law/` | 법제처 OpenAPI **직접 호출**(자체 구현: `search_law`·`get_law_text`·`verify_citations`·`search_decisions`·`get_decision_text`, 공통 전송 `client.ts`) + `law_cache` 캐싱. 인용 검증으로 환각 차단. |
 | `lib/crawler/` | ② 정적 HTML fetch + cheerio + AI 비R&D 판별. JS 렌더링 필요 사이트만 외부 스크래핑 도입 검토. |
 | `lib/ocr/` | ③ 비정형 문서 표준화 (선택). |
 | `lib/env.ts` | zod 환경변수 검증 (boot guard). |
@@ -69,7 +69,7 @@ pnpm db:reset     # DB 초기화
 | LLM은 **상용 API만 사용** | PoC 인프라 단순화. 자체 호스팅 / 내부 모델 제안 금지. |
 | Claude Sonnet 4.6 단독 | 1M context, adaptive thinking, Opus 대비 1.67× 저렴 |
 | 임베딩 OpenAI 고정 | 색인=쿼리 동일 모델·차원 필수. 영구 OpenAI(교체·재색인 없음). Cohere는 재정렬 전용 |
-| 법령은 korean-law MCP | 법제처 공식·실시간 조회 + 인용 검증으로 환각 차단. 우리가 복사·보관하지 않음 |
+| 법령은 법제처 OpenAPI 직접 호출(자체 구현) | korean-law MCP는 개발(Claude Code) 도구라 Vercel 서버리스 런타임에 상주 불가. 동일 기능(5종 도구)을 `lib/law/`에 자체 함수로 구현. 법제처 공식 조회 + 인용 검증으로 환각 차단, `law_cache` 캐싱 |
 | pgvector + tsvector + RRF | Pinecone 등 별도 인프라 불필요, Supabase 내 완결 |
 | `vector(1024)` + HNSW | 2026 pgvector 권장, OpenAI text-embedding-3-small 차원 |
 | Node 런타임 고정 | Anthropic/OpenAI/Cohere SDK가 Node API 의존 |
@@ -81,7 +81,7 @@ pnpm db:reset     # DB 초기화
 | `00-overview.md` | 프로젝트 정체성·일정·민감도 분류 |
 | `01-architecture.md` | 시스템 다이어그램 + 스택 결정 근거 표 |
 | `03-data-model.md` | 테이블 컬럼/인덱스 명세 |
-| `04-feature-advisor.md` | ① 어드바이저 RAG 파이프라인(관련도 분기·법령 MCP) |
+| `04-feature-advisor.md` | ① 어드바이저 RAG 파이프라인(관련도 분기·법제처 직접 호출) |
 | `05-feature-crawler.md` | ② 공모사업 크롤러 설계 (8월 예정) |
 | `07-security-ops.md` | 보안·운영·키 관리·하드닝 정책 |
 
