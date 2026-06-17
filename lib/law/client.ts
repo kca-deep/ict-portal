@@ -18,9 +18,9 @@ export const SEARCH_URL =
   env.LAW_GO_KR_BASE_URL ?? "https://www.law.go.kr/DRF/lawSearch.do";
 export const SERVICE_URL = SEARCH_URL.replace("lawSearch.do", "lawService.do");
 
-// 법제처 DRF 데이터셋 구분. 현재는 법령(law)만 사용 — 판례(prec)·헌재(detc)·
-// 해석례(expc)는 후속 도구에서 동일 빌더로 추가된다.
-export type DrfTarget = "law" | "prec" | "detc" | "expc";
+// 법제처 DRF 데이터셋 구분. 법령(law)·판례(prec)·헌재(detc)·해석례(expc)에 더해
+// aiSearch(본문 의미검색)도 같은 lawSearch.do 인프라에 target 만 바꿔 호출한다.
+export type DrfTarget = "law" | "prec" | "detc" | "expc" | "aiSearch";
 
 export async function getJson(url: string): Promise<any | null> {
   try {
@@ -32,13 +32,16 @@ export async function getJson(url: string): Promise<any | null> {
   }
 }
 
-// 목록 조회 URL (lawSearch.do). search=2 면 본문(판례 판시사항·내용 등)까지 검색.
+// 목록 조회 URL (lawSearch.do). search 의미는 target 별로 다르다:
+// - prec/detc: 2 면 본문(판시사항·내용)까지 검색.
+// - aiSearch: 0 조문 / 1 별표·서식 / 2 행정규칙 / 3 행정규칙 별표.
+// 0 도 유효값이라 falsy 로 떨구지 않도록 undefined 비교로 판정한다.
 export function buildSearchUrl(params: {
   oc: string;
   target: DrfTarget;
   query: string;
   display?: number;
-  search?: 1 | 2;
+  search?: 0 | 1 | 2 | 3;
 }): string {
   const qs = new URLSearchParams({
     OC: params.oc,
@@ -47,7 +50,7 @@ export function buildSearchUrl(params: {
     query: params.query,
     display: String(params.display ?? 3),
   });
-  if (params.search) qs.set("search", String(params.search));
+  if (params.search !== undefined) qs.set("search", String(params.search));
   return `${SEARCH_URL}?${qs.toString()}`;
 }
 

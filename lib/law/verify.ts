@@ -1,7 +1,7 @@
 import { env } from "@/lib/env";
 import {
   searchByName,
-  fetchArticleNumbers,
+  fetchArticleMap,
   type LawRef,
 } from "@/lib/law/search";
 import { expandLawAbbreviation } from "@/lib/law/abbreviations";
@@ -23,6 +23,9 @@ export type CitationVerdict = {
   article: string; // 정규화 조문 ("제15조", "제401조의2")
   status: CitationStatus;
   note?: string;
+  lawId?: string; // 검증된 법령ID (참조문서 본문 회수용)
+  articleTitle?: string; // 조문 제목 ("벌칙")
+  body?: string; // 조문 본문 (verified 인 경우만 — 인용 기준 참조 카드 표시용)
 };
 
 export type CitationCheck = {
@@ -34,8 +37,9 @@ export type CitationCheck = {
 // 법령명은 공백 포함 다어절을 허용("개인정보 보호법", "정보통신망 이용촉진 및 …")하되
 // 쉼표·마침표·따옴표는 문자클래스에서 제외해 문장 경계를 넘지 않는다. 앞 단어가 섞이는
 // 과포착은 resolveLaw 의 앞토큰 제거 재시도로 흡수한다.
+// 법령명 뒤에 닫는 낫표(」』】)·따옴표가 올 수 있다("「근로기준법」 제56조") — 조 앞에서 허용.
 const CITATION_RE =
-  /(?<law>같은\s*법|동법|(?:[가-힣A-Za-z0-9·()]+\s+)*[가-힣A-Za-z0-9·()]*(?:법률|법|령|규칙|규정|조례))\s*제(?<no>\d+)조(?:의(?<branch>\d+))?/g;
+  /(?<law>같은\s*법|동법|(?:[가-힣A-Za-z0-9·()]+\s+)*[가-힣A-Za-z0-9·()]*(?:법률|법|령|규칙|규정|조례))\s*[」』】"']?\s*제(?<no>\d+)조(?:의(?<branch>\d+))?/g;
 
 type ParsedCitation = { raw: string; lawName: string; article: string };
 
@@ -48,7 +52,11 @@ function parseCitations(text: string): ParsedCitation[] {
   for (const m of text.matchAll(CITATION_RE)) {
     const g = m.groups as { law: string; no: string; branch?: string };
     const lawToken = g.law.trim().replace(/\s+/g, " ");
-    const isAnaphora = lawToken.replace(/\s+/g, "") === "같은법" || lawToken === "동법";
+    // "같은 법/동법"이 앞 단어와 함께 과포착돼도(예: "위반한 사용자는 같은 법") 대명사로
+    // 인식해 직전 법령에 바인딩한다. 일반 법령명이 "동법"으로 끝나는 오인(예: "노동법")은
+    // 앞에 공백/문두 경계를 요구해 배제한다.
+    const isAnaphora =
+      /(^|\s)같은\s*법$/.test(lawToken) || /(^|\s)동법$/.test(lawToken);
 
     if (!isAnaphora) currentLaw = expandLawAbbreviation(lawToken);
     if (!currentLaw) continue; // 직전 명시 법령 없이 "같은 법"만 나온 경우 스킵
@@ -57,7 +65,15 @@ function parseCitations(text: string): ParsedCitation[] {
     const key = `${currentLaw}|${article}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ raw: m[0].replace(/\s+/g, " ").trim(), lawName: currentLaw, article });
+    // 표기는 과포착된 앞 단어를 떼고: 대명사는 "같은 법/동법"부터, 아니면 법령 토큰.
+    const displayLaw = isAnaphora
+      ? lawToken.match(/(같은\s*법|동법)$/)?.[0] ?? lawToken
+      : lawToken;
+    const raw = `${displayLaw} ${article}`
+      .replace(/[「」『』【】]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    out.push({ raw, lawName: currentLaw, article });
   }
   return out;
 }
@@ -91,16 +107,17 @@ export async function verifyCitations(
     return { verdicts: [], hasHallucination: false };
   }
 
-  // 법령별 본문 조회·조문집합은 1회만 (동일 법령 다수 인용 시 중복 호출 방지).
-  const lawCache = new Map<string, { ref: LawRef | null; articles: Set<string> }>();
-  async function lawInfo(lawName: string) {
+  // 법령별 본문 조회·조문맵은 1회만 (동일 법령 다수 인용 시 중복 호출 방지).
+  type LawInfo = { ref: LawRef | null; map: Map<string, { title: string; body: string }> };
+  const lawCache = new Map<string, LawInfo>();
+  async function lawInfo(lawName: string): Promise<LawInfo> {
     const cached = lawCache.get(lawName);
     if (cached) return cached;
     const ref = await resolveLaw(oc!, lawName);
-    const articles = ref
-      ? await fetchArticleNumbers(oc!, ref.lawId)
-      : new Set<string>();
-    const info = { ref, articles };
+    const map = ref
+      ? await fetchArticleMap(oc!, ref.lawId)
+      : new Map<string, { title: string; body: string }>();
+    const info: LawInfo = { ref, map };
     lawCache.set(lawName, info);
     return info;
   }
@@ -108,7 +125,7 @@ export async function verifyCitations(
   const verdicts = await Promise.all(
     parsed.map(async (c): Promise<CitationVerdict> => {
       try {
-        const { ref, articles } = await lawInfo(c.lawName);
+        const { ref, map } = await lawInfo(c.lawName);
         if (!ref) {
           return {
             ...c,
@@ -116,7 +133,8 @@ export async function verifyCitations(
             note: "법제처 DB에 해당 법령 없음 (법령명 오류 또는 미존재)",
           };
         }
-        if (articles.has(c.article)) {
+        const found = map.get(c.article);
+        if (found) {
           // 조문은 실존. 다만 현행이 아닌(연혁/폐지) 법령이면 currency 경고를 단다.
           const stale = Boolean(ref.status) && !ref.status!.includes("현행");
           return {
@@ -126,15 +144,18 @@ export async function verifyCitations(
             note: stale
               ? `연혁·폐지 법령일 수 있음 (현행연혁: ${ref.status}) — 현행 여부 확인 필요`
               : undefined,
+            lawId: ref.lawId,
+            articleTitle: found.title,
+            body: found.body,
           };
         }
         // 법령은 존재하나 해당 조문이 없음 → 환각 가능성.
         return {
           ...c,
           lawName: ref.name,
-          status: articles.size === 0 ? "ambiguous" : "not_found",
+          status: map.size === 0 ? "ambiguous" : "not_found",
           note:
-            articles.size === 0
+            map.size === 0
               ? "법령 본문 조회 실패 — 조문 존재 확인 불가"
               : `「${ref.name}」에 ${c.article} 없음`,
         };

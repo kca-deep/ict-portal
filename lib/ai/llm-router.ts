@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import {
   CHAT_SYSTEM_PROMPT,
   RELEVANCE_GATE_PROMPT,
+  SCOPE_GATE_PROMPT,
   SYSTEM_PROMPT,
 } from "@/lib/ai/prompts";
 
@@ -80,6 +81,41 @@ export async function isRegulationSufficient(
   } catch (err) {
     console.error(
       "[chat] relevance gate failed, treating as sufficient:",
+      (err as Error).message,
+    );
+    return true;
+  }
+}
+
+/**
+ * 범위 게이트: 질문이 이 서비스(ICT기금 규정·법령·행정) 안내 범위인지 YES/NO 판정.
+ * 규정 관련도가 낮은 질의(잡담 포함)에만 호출해, 범위 밖이면 법령·판례 검색과
+ * 참조문서를 모두 생략하고 정중히 거절만 하도록 route 가 분기한다.
+ * 실패 시 범위 내(true)로 폴백 — 게이트 장애로 정상 질문을 막지 않는다.
+ */
+export async function isInScope(query: string): Promise<boolean> {
+  if (!query.trim()) return false;
+  try {
+    const res = await anthropic.messages.create({
+      model: env.LLM_MODEL,
+      max_tokens: 8,
+      system: [{ type: "text", text: SCOPE_GATE_PROMPT }],
+      messages: [
+        {
+          role: "user",
+          content: `질문: ${query}\n\n위 질문이 이 서비스(ICT기금 규정·법령·행정) 안내 범위에 속하면 YES, 무관하면 NO. 한 단어만.`,
+        },
+      ],
+    });
+    const text = res.content
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("")
+      .trim()
+      .toUpperCase();
+    return !text.startsWith("NO");
+  } catch (err) {
+    console.error(
+      "[chat] scope gate failed, treating as in-scope:",
       (err as Error).message,
     );
     return true;

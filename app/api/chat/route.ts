@@ -2,12 +2,13 @@ import { NextRequest } from "next/server";
 import {
   ragChatStream,
   isRegulationSufficient,
+  isInScope,
   type ChatMessage,
   type RetrievedDoc,
 } from "@/lib/ai/llm-router";
 import { regulationSearch, type DocumentHit } from "@/lib/db/search";
 import { rerank } from "@/lib/ai/rerank";
-import { searchLaw } from "@/lib/law/search";
+import { searchAiLaw, formatArticle } from "@/lib/law/search";
 import {
   searchDecisions,
   getDecisionText,
@@ -15,7 +16,11 @@ import {
   type DecisionText,
   type DecisionDomain,
 } from "@/lib/law/decisions";
-import { verifyCitations, type CitationVerdict } from "@/lib/law/verify";
+import {
+  verifyCitations,
+  type CitationVerdict,
+  type CitationCheck,
+} from "@/lib/law/verify";
 import { env } from "@/lib/env";
 
 export const runtime = "nodejs";
@@ -94,9 +99,9 @@ function toPrecedentSource(
   i: number,
 ): SourceChunk {
   const parts = [
-    t.summary && `[판시사항] ${t.summary}`,
-    t.holding && `[판결요지] ${t.holding}`,
-    t.refStatutes && `[참조조문] ${t.refStatutes}`,
+    t.summary && `**판시사항**\n\n${t.summary}`,
+    t.holding && `**판결요지**\n\n${t.holding}`,
+    t.refStatutes && `**참조조문**\n\n${t.refStatutes}`,
   ].filter(Boolean) as string[];
   return {
     // 법령 소스(-(i+1))와 겹치지 않는 별도 음수 대역.
@@ -188,11 +193,18 @@ export async function POST(req: NextRequest) {
         //    (b)는 점수는 높지만 실제로는 규정에 답이 없는 회색지대를 잡는다.
         const maxScore = sources.length > 0 ? sources[0].score : 0;
         const belowThreshold = maxScore < env.RELEVANCE_THRESHOLD;
+
+        // 범위 게이트: 규정 관련도가 낮은 질의(잡담 포함)는 법령 분기 전에 서비스
+        // 범위(법령·규정·행정·공공기금)인지 확인한다. 범위 밖이면 법령·판례 검색과
+        // 참조문서를 모두 생략하고 정중한 거절만 스트리밍한다.
+        const outOfScope = belowThreshold ? !(await isInScope(query)) : false;
+
         let gateSufficient: boolean | null = null;
         if (!belowThreshold) {
           gateSufficient = await isRegulationSufficient(query, retrievedDocs);
         }
-        const routedToLaw = belowThreshold || gateSufficient === false;
+        const routedToLaw =
+          !outOfScope && (belowThreshold || gateSufficient === false);
 
         let lawContext: string | undefined;
         let lawSources: SourceChunk[] = [];
@@ -200,21 +212,21 @@ export async function POST(req: NextRequest) {
         if (routedToLaw) {
           // 법령과 판례를 동시 조회 (둘 다 법제처 — 병렬로 응답 전 지연 최소화).
           const [law, precRefs] = await Promise.all([
-            searchLaw(query),
+            searchAiLaw(query),
             searchDecisions(query, "prec", 2),
           ]);
           if (law.context) lawContext = law.context;
-          // 법령을 참조문서로 변환 — 1위 법령엔 발췌 조문 본문, 나머지는 메타 요약.
+          // 법령을 참조문서로 변환 — 각 법령에 대응하는 발췌 조문(articles[i])과
+          // 관련도(score)를 함께 싣는다. aiSearch 는 refs[i] ↔ articles[i] 정렬.
           lawSources = law.refs.map((r, i) => ({
             id: -(i + 1),
             title: r.name,
             source_ref: `법제처 국가법령정보 · 법령ID ${r.lawId}`,
             content:
-              i === 0 && law.articles.length > 0
-                ? law.articles.join("\n\n")
-                : `${r.name}\n공포일 ${r.promulgated}${r.ministry ? ` · 소관 ${r.ministry}` : ""}`,
+              law.articles[i] ??
+              `${r.name}${r.promulgated ? `\n공포일 ${r.promulgated}` : ""}${r.ministry ? ` · 소관 ${r.ministry}` : ""}`,
             metadata: { kind: "law", lawId: r.lawId },
-            score: 0,
+            score: r.score ?? 0,
           }));
 
           // 상위 판례 본문을 회수해 참조문서 + 컨텍스트로 보강 (best-effort).
@@ -235,51 +247,79 @@ export async function POST(req: NextRequest) {
         }));
 
         console.log(
-          `[chat] route=${routedToLaw ? "law" : "regulation"} maxScore=${maxScore.toFixed(3)} ` +
+          `[chat] route=${outOfScope ? "out_of_scope" : routedToLaw ? "law" : "regulation"} maxScore=${maxScore.toFixed(3)} ` +
             `threshold=${env.RELEVANCE_THRESHOLD} belowThreshold=${belowThreshold} gateSufficient=${gateSufficient} ` +
             `hits=${hits.length}` +
             (routedToLaw ? ` laws=[${lawRefs.map((r) => r.name).join(", ")}]` : " (법제처 미호출)"),
         );
 
         // 5) 답변을 먼저 스트리밍한다. (인용 검증용으로 본문을 누적)
+        //    범위 밖이면 어떤 근거도 주지 않아, 시스템 프롬프트의 범위 밖 거절만 나오게 한다.
         let answerText = "";
-        for await (const chunk of ragChatStream(body.messages, retrievedDocs, lawContext)) {
+        const answerDocs = outOfScope ? [] : retrievedDocs;
+        const answerLawContext = outOfScope ? undefined : lawContext;
+        for await (const chunk of ragChatStream(body.messages, answerDocs, answerLawContext)) {
           answerText += chunk;
           send(controller, { type: "delta", text: chunk });
         }
 
-        // 6) 답변 완료 후 라우팅·참조문서를 전송 (UI: 답변 아래에 참조 패널 노출).
-        //    법령 분기면 실제 근거인 법령을, 규정 분기면 규정 청크를 참조문서로 표시.
-        const displayedSources = routedToLaw
-          ? [...lawSources, ...precedentSources]
-          : sources;
-        send(
-          controller,
-          routedToLaw
-            ? { type: "routing", route: "law", score: maxScore, laws: lawRefs }
-            : { type: "routing", route: "regulation", score: maxScore },
-        );
-        send(controller, { type: "sources", data: displayedSources });
-
-        // 7) 법령 분기면 답변의 조문 인용을 법제처 DB와 교차 검증(환각 차단).
-        //    답변이 이미 스트리밍 완료된 뒤라 체감 지연 없음. best-effort.
+        // 6) 법령 분기면 답변의 조문 인용을 법제처 DB와 교차 검증한다(환각 차단).
+        //    검증은 "답변이 실제 인용한 조문"을 본문과 함께 돌려주므로, 검색(aiSearch)이
+        //    끌어온 곁가지 조문 대신 이 인용 조문을 참조문서로 보여 줄 수 있다
+        //    (참조-답변 불일치 해소). 답변이 이미 스트리밍 완료된 뒤라 체감 지연 적음.
+        let citationCheck: CitationCheck | null = null;
         if (routedToLaw) {
           try {
-            const check = await verifyCitations(answerText);
-            if (check.verdicts.length > 0) {
-              send(controller, {
-                type: "citations",
-                data: check.verdicts,
-                hasHallucination: check.hasHallucination,
-              });
-              console.log(
-                `[chat] citations verified=${check.verdicts.filter((v) => v.status === "verified").length}/${check.verdicts.length} ` +
-                  `hallucination=${check.hasHallucination}`,
-              );
-            }
+            citationCheck = await verifyCitations(answerText);
           } catch (err) {
             console.error("[chat] citation verify failed:", (err as Error).message);
           }
+        }
+
+        // 답변이 인용했고 법제처에 실존이 확인된 조문을, 그 본문과 함께 참조 카드로.
+        const citationSources: SourceChunk[] = (citationCheck?.verdicts ?? [])
+          .filter((v) => v.status === "verified" && v.body)
+          .map((v, i) => ({
+            id: -(200 + i),
+            title: v.lawName,
+            source_ref: `법제처 국가법령정보 · 법령ID ${v.lawId ?? ""}`,
+            content: formatArticle(v.article, v.articleTitle ?? "", v.body!),
+            metadata: { kind: "law", lawId: v.lawId, article: v.article, cited: true },
+            score: 1,
+          }));
+
+        // 7) 라우팅·참조문서 전송. 법령 분기면 인용 조문(있으면)을, 없으면 검색 조문을,
+        //    규정 분기면 규정 청크를 참조문서로 표시.
+        //    범위 밖이면 참조문서를 일절 표시하지 않는다(빈 배열).
+        const displayedSources = outOfScope
+          ? []
+          : routedToLaw
+            ? citationSources.length > 0
+              ? [...citationSources, ...precedentSources]
+              : [...lawSources, ...precedentSources]
+            : sources;
+        if (!outOfScope) {
+          send(
+            controller,
+            routedToLaw
+              ? { type: "routing", route: "law", score: maxScore, laws: lawRefs }
+              : { type: "routing", route: "regulation", score: maxScore },
+          );
+        }
+        send(controller, { type: "sources", data: displayedSources });
+
+        // 8) 인용 검증 결과(✓/✗/⚠)를 전송(UI 환각 경고용). 본문(body)은 참조 카드가
+        //    이미 싣고 있으니 이벤트에선 떼어 가볍게 보낸다.
+        if (citationCheck && citationCheck.verdicts.length > 0) {
+          send(controller, {
+            type: "citations",
+            data: citationCheck.verdicts.map(({ body: _body, ...v }) => v),
+            hasHallucination: citationCheck.hasHallucination,
+          });
+          console.log(
+            `[chat] citations verified=${citationCheck.verdicts.filter((v) => v.status === "verified").length}/${citationCheck.verdicts.length} ` +
+              `hallucination=${citationCheck.hasHallucination} citedSources=${citationSources.length}`,
+          );
         }
 
         send(controller, { type: "done" });
