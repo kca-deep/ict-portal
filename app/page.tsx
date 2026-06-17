@@ -30,8 +30,12 @@ export default function Home() {
     source: SourceChunk;
     index: number;
   } | null>(null);
+  // 위로 올려 읽는 중이면 '↓ 최신으로' 버튼을 띄운다(맨 아래에선 숨김).
+  const [atBottom, setAtBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 진행 중인 /api/chat 요청을 '멈춤' 버튼에서 도중에 끊기 위한 핸들.
+  const abortRef = useRef<AbortController | null>(null);
   // 사용자가 맨 아래 근처에 있을 때만 자동 스크롤. 위로 올리면 스트리밍 중에도 따라가지 않음.
   const stickToBottomRef = useRef(true);
 
@@ -41,6 +45,15 @@ export default function Home() {
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     // 맨 아래에 (거의) 닿았을 때만 자동추적 재개. 위로 올린 상태면 따라가지 않음.
     stickToBottomRef.current = distanceFromBottom < 24;
+    setAtBottom(distanceFromBottom < 24);
+  }
+
+  function scrollToBottom() {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickToBottomRef.current = true;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    setAtBottom(true);
   }
 
   // 사용자의 "위로 스크롤" 의도를 동기적으로 포착해 자동추적을 즉시 해제한다.
@@ -111,11 +124,15 @@ export default function Home() {
     setError(null);
     setLoading(true);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: historyForApi }),
+        signal: controller.signal,
       });
       if (!res.ok || !res.body) {
         const msg = await res.text().catch(() => "");
@@ -166,12 +183,27 @@ export default function Home() {
         }
       }
     } catch (err) {
-      setError((err as Error).message);
-      setMessages((prev) => prev.slice(0, -1));
+      if ((err as Error).name === "AbortError") {
+        // 사용자가 '멈춤'을 눌렀다. 지금까지 받은 답은 그대로 남기되,
+        // 한 글자도 못 받았으면 빈 말풍선을 제거한다.
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.role === "assistant" && !last.content) return prev.slice(0, -1);
+          return prev;
+        });
+      } else {
+        setError((err as Error).message);
+        setMessages((prev) => prev.slice(0, -1));
+      }
     } finally {
+      abortRef.current = null;
       setLoading(false);
       textareaRef.current?.focus();
     }
+  }
+
+  function stop() {
+    abortRef.current?.abort();
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -264,6 +296,9 @@ export default function Home() {
                       </span>
                     )}
                   </div>
+                  {m.content && !(loading && i === messages.length - 1) && (
+                    <CopyButton text={m.content} />
+                  )}
                   {m.sources && m.sources.length > 0 && (
                     <Sources
                       sources={m.sources}
@@ -286,7 +321,15 @@ export default function Home() {
         </div>
 
         {/* Input */}
-        <div className="px-4 py-4 shrink-0">
+        <div className="px-4 py-4 shrink-0 relative">
+          {!atBottom && messages.length > 0 && (
+            <button
+              onClick={scrollToBottom}
+              className="absolute -top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1 rounded-full bg-card text-card-foreground text-xs font-medium px-3 py-1.5 shadow-lg border border-border hover:bg-muted/40 transition-colors"
+            >
+              ↓ 최신으로
+            </button>
+          )}
           <div className="flex gap-2 items-end">
             <textarea
               ref={textareaRef}
@@ -298,13 +341,22 @@ export default function Home() {
               className="flex-1 resize-none rounded-2xl px-4 py-3 text-sm bg-card text-card-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring shadow-lg max-h-40"
               disabled={loading}
             />
-            <button
-              onClick={send}
-              disabled={loading || !input.trim()}
-              className="rounded-2xl bg-primary text-primary-foreground text-sm font-semibold px-5 py-3 shadow-lg transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {loading ? "…" : "전송"}
-            </button>
+            {loading ? (
+              <button
+                onClick={stop}
+                className="rounded-2xl bg-destructive text-destructive-foreground text-sm font-semibold px-5 py-3 shadow-lg transition-opacity hover:opacity-90"
+              >
+                멈춤
+              </button>
+            ) : (
+              <button
+                onClick={send}
+                disabled={!input.trim()}
+                className="rounded-2xl bg-primary text-primary-foreground text-sm font-semibold px-5 py-3 shadow-lg transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                전송
+              </button>
+            )}
           </div>
         </div>
         </div>
@@ -318,6 +370,68 @@ export default function Home() {
         />
       )}
     </main>
+  );
+}
+
+/** 답변 말풍선마다 붙는 복사 버튼. 원본 마크다운 텍스트를 클립보드에 넣는다. */
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // 클립보드 접근 실패(권한·비보안 컨텍스트)는 조용히 무시한다.
+    }
+  }
+  return (
+    <button
+      onClick={copy}
+      className={`self-start inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium shadow-sm transition-colors ${
+        copied
+          ? "border-primary/30 bg-primary/10 text-primary"
+          : "border-border bg-card text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+      }`}
+      title="답변 복사"
+    >
+      {copied ? (
+        <>
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+          복사됨
+        </>
+      ) : (
+        <>
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          복사
+        </>
+      )}
+    </button>
   );
 }
 
