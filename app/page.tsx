@@ -7,6 +7,7 @@ import {
   relevancePercent,
   type SourceChunk,
 } from "@/components/ui/source-panel";
+import { useTurnstileToken } from "@/components/turnstile-gate";
 
 type Message = {
   role: "user" | "assistant";
@@ -34,6 +35,7 @@ export default function Home() {
   const [atBottom, setAtBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { getToken, Widget } = useTurnstileToken();
   // 진행 중인 /api/chat 요청을 '멈춤' 버튼에서 도중에 끊기 위한 핸들.
   const abortRef = useRef<AbortController | null>(null);
   // 사용자가 맨 아래 근처에 있을 때만 자동 스크롤. 위로 올리면 스트리밍 중에도 따라가지 않음.
@@ -127,11 +129,13 @@ export default function Home() {
     const controller = new AbortController();
     abortRef.current = controller;
 
+    const turnstileToken = (await getToken()) ?? undefined;
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: historyForApi }),
+        body: JSON.stringify({ messages: historyForApi, turnstileToken }),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
@@ -369,6 +373,7 @@ export default function Home() {
           onClose={() => setActiveSource(null)}
         />
       )}
+      <Widget />
     </main>
   );
 }

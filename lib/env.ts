@@ -35,6 +35,11 @@ const envSchema = z.object({
 
   // ingest 관리자 시크릿 — 미설정 시 /api/ingest 는 항상 403(외부 노출 금지).
   INGEST_SECRET: z.string().optional(),
+
+  // Turnstile 봇 게이트 (공개 오픈). 토글 "false" 강제 OFF / 키 부재 시 자동 OFF(기존 동작).
+  TURNSTILE_ENABLED: z.string().optional(),
+  NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().optional(),
+  TURNSTILE_SECRET_KEY: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

@@ -22,12 +22,14 @@ import {
   type CitationCheck,
 } from "@/lib/law/verify";
 import { env } from "@/lib/env";
+import { verifyTurnstile } from "@/lib/security/turnstile";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 type ChatRequest = {
   messages: ChatMessage[];
+  turnstileToken?: string;
 };
 
 export type SourceChunk = {
@@ -161,6 +163,12 @@ export async function POST(req: NextRequest) {
     return new Response("messages required: [{role, content}]", {
       status: 400,
     });
+  }
+
+  // Turnstile 게이트(활성 시). 비활성/키부재면 verifyTurnstile 이 즉시 true.
+  const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  if (!(await verifyTurnstile(body.turnstileToken, clientIp))) {
+    return new Response("bot verification failed", { status: 403 });
   }
 
   const lastUser = [...body.messages].reverse().find((m) => m.role === "user");
