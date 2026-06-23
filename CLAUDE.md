@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 기획·아키텍처 의사결정의 진실원은 `docs/`. 본 파일은 코드 작업용 요약이며, 의사결정 근거가 필요하면 해당 문서를 우선 참조.
 
-**현황·로드맵**: 챗봇 핵심(검색·재정렬·스트리밍 UI)은 개발완료 상태. 이용 대상은 **ICT기금 외부 기관 담당자**(로그인 필수, 공개 가입 차단, 초대·승인 기반 계정). AI 챗봇 개발완료 6월 말 → Vercel 오픈 환경설정·취약점 하드닝 → 정식 오픈 7월 말. 크롤러 8월 말, 중복수혜 8월 이후 선택.
+**현황·로드맵**: 챗봇 핵심(검색·재정렬·스트리밍 UI)은 개발완료 상태. 이용 대상은 **불특정 공개 이용자**(로그인 없음). 봇·악용은 Turnstile 봇 게이트(토글/키 기반)와 IP 레이트리밋·일일 호출 캡으로 통제. 두 게이트 모두 키/토글 부재 시 비활성(기존 동작 유지). AI 챗봇 개발완료 6월 말 → Vercel 오픈 환경설정·취약점 하드닝 → 정식 오픈 7월 말. 크롤러 8월 말, 중복수혜 8월 이후 선택.
 
 ## 기술 스택
 
@@ -44,7 +44,7 @@ pnpm db:reset     # DB 초기화
 
 진입점은 `app/api/*/route.ts`. 도메인 로직은 `lib/`에 모이고, App Router는 thin handler만.
 
-- `app/api/chat` → `lib/ai`(OpenAI 임베딩 · Cohere 재정렬 · Claude LLM) + `lib/db/search.ts`(hybrid_search / regulation_search RPC). 흐름: 내부 규정 검색 → Cohere Rerank → 관련도 분기(기준치 이상=내부 규정 근거 / 미만=법제처 OpenAPI 직접 호출로 법령·판례 조회 + 인용 검증) → Claude 스트리밍. `query_log` 비동기 적재(관리자 로그 원천). ※ 오픈 전 하드닝 필요: 로그인 게이트·레이트리밋·에러 일반화(`docs/07` 참조).
+- `app/api/chat` → `lib/ai`(OpenAI 임베딩 · Cohere 재정렬 · Claude LLM) + `lib/db/search.ts`(hybrid_search / regulation_search RPC). 흐름: 내부 규정 검색 → Cohere Rerank → 관련도 분기(기준치 이상=내부 규정 근거 / 미만=법제처 OpenAPI 직접 호출로 법령·판례 조회 + 인용 검증) → Claude 스트리밍. `query_log` 비동기 적재(관리자 로그 원천). ※ 게이트: Turnstile 봇 게이트(토글/키 기반, 기본 OFF) + IP 레이트리밋(기본 OFF) + 입력 캡(MAX_TURNS/MAX_CONTENT_CHARS) + 에러 일반화 적용. 상세 env 키 목록은 `.env.example` 참조.
 - `app/api/ingest` → 64건 단위 배치 임베딩 후 `documents` 적재. ※ 외부 노출 금지 — 관리자 전용/스크립트 전용화 대상.
 - `app/api/cron/*` → Vercel Cron으로 ② 크롤러 / 법령 캐시 갱신.
 - `app/api/duplicate-check` → ③ 중복수혜 (placeholder, 선택 기능).
