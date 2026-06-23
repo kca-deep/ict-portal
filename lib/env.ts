@@ -28,6 +28,10 @@ const envSchema = z.object({
 
   CRAWLER_USER_AGENT: z.string().default("PIMS-Crawler/1.0"),
   CRAWLER_TIMEOUT_MS: z.coerce.number().default(10000),
+
+  // 챗 입력 가드 (공개 오픈 대비 — 비용·악용 증폭 차단)
+  MAX_TURNS: z.coerce.number().default(30),
+  MAX_CONTENT_CHARS: z.coerce.number().default(8000),
 });
 
 export const env = envSchema.parse(process.env);

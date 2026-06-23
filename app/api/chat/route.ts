@@ -135,6 +135,7 @@ function buildPrecedentContext(
 
 function isValidMessages(value: unknown): value is ChatMessage[] {
   if (!Array.isArray(value) || value.length === 0) return false;
+  if (value.length > env.MAX_TURNS) return false;
   return value.every(
     (m) =>
       m &&
@@ -143,7 +144,8 @@ function isValidMessages(value: unknown): value is ChatMessage[] {
       ((m as ChatMessage).role === "user" ||
         (m as ChatMessage).role === "assistant") &&
       typeof (m as ChatMessage).content === "string" &&
-      (m as ChatMessage).content.trim().length > 0,
+      (m as ChatMessage).content.trim().length > 0 &&
+      (m as ChatMessage).content.length <= env.MAX_CONTENT_CHARS,
   );
 }
 
