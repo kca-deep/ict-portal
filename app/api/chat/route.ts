@@ -23,6 +23,7 @@ import {
 } from "@/lib/law/verify";
 import { env } from "@/lib/env";
 import { verifyTurnstile } from "@/lib/security/turnstile";
+import { checkRateLimit } from "@/lib/security/ratelimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -169,6 +170,11 @@ export async function POST(req: NextRequest) {
   const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   if (!(await verifyTurnstile(body.turnstileToken, clientIp))) {
     return new Response("bot verification failed", { status: 403 });
+  }
+
+  // 레이트리밋(활성 시). 비활성이면 checkRateLimit 이 즉시 통과.
+  if (!(await checkRateLimit(clientIp)).ok) {
+    return new Response("rate limit exceeded", { status: 429 });
   }
 
   const lastUser = [...body.messages].reverse().find((m) => m.role === "user");

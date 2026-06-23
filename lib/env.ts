@@ -40,6 +40,11 @@ const envSchema = z.object({
   TURNSTILE_ENABLED: z.string().optional(),
   NEXT_PUBLIC_TURNSTILE_SITE_KEY: z.string().optional(),
   TURNSTILE_SECRET_KEY: z.string().optional(),
+
+  // 레이트리밋(공개 오픈 골격). 기본 OFF. 임계는 후속 개선.
+  RATE_LIMIT_ENABLED: z.string().optional(),
+  RATE_LIMIT_PER_MIN: z.coerce.number().default(20),
+  RATE_LIMIT_DAILY_CAP: z.coerce.number().default(2000),
 });
 
 export const env = envSchema.parse(process.env);
