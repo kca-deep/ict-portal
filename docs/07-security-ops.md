@@ -129,7 +129,7 @@ create policy "query_log_admin" on public.query_log
 
 > **구현 상태(적용)**: `INGEST_SECRET` 환경변수 기반 헤더 인증 게이트 적용 완료.
 
-- `INGEST_SECRET` 미설정 시 `/api/ingest` 전체 차단(503).
+- `INGEST_SECRET` 미설정 시 `/api/ingest` 전체 차단(403).
 - 설정 시 요청 헤더 `x-ingest-secret` 값 검증. 불일치 시 401.
 - 적재 스크립트는 `x-ingest-secret` 헤더로 전송.
 - 외부 사용자에게는 어떤 경우에도 색인 경로를 열지 않습니다.
