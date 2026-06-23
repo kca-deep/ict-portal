@@ -31,17 +31,17 @@ const BADGE: Record<SourceKind, { icon: string; label: string; cls: string }> = 
   regulation: {
     icon: "📘",
     label: "내부규정",
-    cls: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+    cls: "bg-badge-regulation/15 text-badge-regulation",
   },
   law: {
     icon: "⚖️",
     label: "법령",
-    cls: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
+    cls: "bg-badge-law/15 text-badge-law",
   },
   precedent: {
     icon: "⚖️",
     label: "판례",
-    cls: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
+    cls: "bg-badge-law/15 text-badge-law",
   },
 };
 
@@ -143,7 +143,7 @@ export function SourcePanel({
                 href={lawUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 font-semibold text-violet-600 hover:underline dark:text-violet-400"
+                className="inline-flex items-center gap-1 font-semibold text-badge-law hover:underline"
               >
                 법제처 원문 ↗
               </a>

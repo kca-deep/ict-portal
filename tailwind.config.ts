@@ -44,6 +44,8 @@ const config: Config = {
           DEFAULT: "var(--destructive)",
           foreground: "var(--destructive-foreground)",
         },
+        "badge-regulation": "var(--badge-regulation)",
+        "badge-law": "var(--badge-law)",
         border: "var(--border)",
         input: "var(--input)",
         ring: "var(--ring)",

@@ -10,13 +10,16 @@
   --popover: oklch(1.0000 0 0);
   --popover-foreground: oklch(0.2686 0 0);
   --primary: oklch(0.7686 0.1647 264.5419);
-  --primary-foreground: oklch(0 0 0);
+  --primary-foreground: oklch(0.2686 0 0);
   --secondary: oklch(0.9670 0.0029 264.5419);
   --secondary-foreground: oklch(0.4461 0.0263 256.8018);
   --muted: oklch(0.9846 0.0017 247.8389);
   --muted-foreground: oklch(0.5510 0.0234 264.3637);
   --accent: oklch(0.9869 0.0214 264.5419);
   --accent-foreground: oklch(0.4732 0.1247 264.5419);
+  /* 출처 종류 뱃지 색 (source-panel) — 의미 구분용. regulation=파랑 / law·precedent=보라 */
+  --badge-regulation: oklch(0.5461 0.2152 262.8809);
+  --badge-law: oklch(0.5413 0.2466 293.0090);
   --destructive: oklch(0.6368 0.2078 25.3313);
   --destructive-foreground: oklch(1.0000 0 0);
   --border: oklch(0.9276 0.0058 264.5313);
@@ -63,13 +66,16 @@
   --popover: oklch(0.2686 0 0);
   --popover-foreground: oklch(0.9219 0 0);
   --primary: oklch(0.7686 0.1647 264.5419);
-  --primary-foreground: oklch(0 0 0);
+  --primary-foreground: oklch(0.2686 0 0);
   --secondary: oklch(0.2686 0 0);
   --secondary-foreground: oklch(0.9219 0 0);
   --muted: oklch(0.2393 0 0);
   --muted-foreground: oklch(0.7155 0 0);
   --accent: oklch(0.4732 0.1247 264.5419);
   --accent-foreground: oklch(0.9243 0.1151 264.5419);
+  /* 출처 종류 뱃지 색 (source-panel) — 다크모드 변형(밝은 톤). */
+  --badge-regulation: oklch(0.7137 0.1434 254.6240);
+  --badge-law: oklch(0.7090 0.1592 293.5412);
   --destructive: oklch(0.6368 0.2078 25.3313);
   --destructive-foreground: oklch(1.0000 0 0);
   --border: oklch(0.3715 0 0);
