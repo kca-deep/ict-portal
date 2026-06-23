@@ -326,7 +326,13 @@ export async function POST(req: NextRequest) {
 
         send(controller, { type: "done" });
       } catch (err) {
-        send(controller, { type: "error", message: (err as Error).message });
+        // 내부 오류 메시지(DB 디테일·SDK 에러 등)는 클라이언트에 노출하지 않는다.
+        // 실제 원인은 서버 로그로만 남기고, 사용자에겐 일반화 메시지를 전송한다.
+        console.error("[chat] stream failed:", (err as Error).message);
+        send(controller, {
+          type: "error",
+          message: "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+        });
       } finally {
         controller.close();
       }
