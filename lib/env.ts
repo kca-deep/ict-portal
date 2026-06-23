@@ -32,6 +32,9 @@ const envSchema = z.object({
   // 챗 입력 가드 (공개 오픈 대비 — 비용·악용 증폭 차단)
   MAX_TURNS: z.coerce.number().default(30),
   MAX_CONTENT_CHARS: z.coerce.number().default(8000),
+
+  // ingest 관리자 시크릿 — 미설정 시 /api/ingest 는 항상 403(외부 노출 금지).
+  INGEST_SECRET: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

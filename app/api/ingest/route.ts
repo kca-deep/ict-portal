@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { embed } from "@/lib/ai/embedding";
 import { getSupabaseAdmin } from "@/lib/db/supabase";
+import { env } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -22,6 +23,14 @@ type IngestBody = {
 const BATCH = 64;
 
 export async function POST(req: NextRequest) {
+  // C3: ingest 는 관리자 전용. 시크릿 미설정이면 완전 차단(docs/07 §4.4 "외부 노출 금지").
+  if (!env.INGEST_SECRET) {
+    return Response.json({ error: "ingest disabled" }, { status: 403 });
+  }
+  if (req.headers.get("x-ingest-secret") !== env.INGEST_SECRET) {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
+  }
+
   let body: IngestBody;
   try {
     body = (await req.json()) as IngestBody;
