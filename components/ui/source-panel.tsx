@@ -82,7 +82,7 @@ export function SourcePanel({
         aria-label="근거 원문"
         className="
           fixed inset-x-0 bottom-0 z-40 flex max-h-[88vh] flex-col p-3
-          md:static md:inset-auto md:z-auto md:h-full md:max-h-none md:w-1/2 md:shrink-0 md:p-5 md:pl-2.5
+          md:static md:inset-auto md:z-auto md:h-full md:max-h-none md:w-2/5 md:shrink-0 md:p-5 md:pl-2.5
         "
       >
         {/* 떠 있는 둥근 옅은색 카드 */}

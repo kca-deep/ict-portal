@@ -131,6 +131,63 @@ export default function Home() {
 
     const turnstileToken = (await getToken()) ?? undefined;
 
+    // ── 타이핑 smoothing 버퍼 ───────────────────────────────────
+    // 서버는 답변을 ~20자/~400ms 덩어리로 보낸다(원인 진단으로 확인). 그대로 그리면
+    // 0.4초마다 20자씩 점프해 끊겨 보인다. 받은 글자는 target 에 쌓아두고 rAF로 일정
+    // 속도로 흘려보내 부드러운 타이핑처럼 보이게 한다. 표시 속도 = 남은 버퍼를 ~0.28초에
+    // 비우는 속도(24~180자/초로 클램프) — 버퍼가 차면 빨라지고 비면 느려져, 다음 delta
+    // 도착 전까지 끊김 없이 이어진다. setMessages 는 표시 글자 수가 바뀔 때만 호출.
+    let target = ""; // 서버에서 받은 전체 텍스트(누적)
+    let shown = 0; // 현재 화면에 표시된 글자 수
+    let streamDone = false; // 서버 스트림 종료 여부
+    let sources: SourceChunk[] | undefined;
+    let rafId = 0;
+    let lastTs = 0;
+    let resolveTyping: () => void = () => {};
+    const typingDone = new Promise<void>((r) => (resolveTyping = r));
+
+    const renderShown = () => {
+      const visible = target.slice(0, shown);
+      setMessages((prev) => {
+        const copy = prev.slice();
+        copy[copy.length - 1] = { role: "assistant", content: visible, sources };
+        return copy;
+      });
+    };
+
+    const tick = (ts: number) => {
+      if (!lastTs) lastTs = ts;
+      const dt = Math.min(0.05, (ts - lastTs) / 1000); // 탭 비활성 복귀 시 과도한 점프 방지
+      lastTs = ts;
+
+      const remaining = target.length - shown;
+      if (remaining > 0) {
+        const cps = Math.min(180, Math.max(24, remaining / 0.28));
+        shown = Math.min(target.length, shown + Math.max(1, Math.round(cps * dt)));
+        renderShown();
+      }
+
+      if (streamDone && shown >= target.length) {
+        renderShown(); // 최종 커밋(참조문서 포함)
+        rafId = 0;
+        resolveTyping();
+        return;
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    const startTyping = () => {
+      if (!rafId) {
+        lastTs = 0;
+        rafId = requestAnimationFrame(tick);
+      }
+    };
+    const stopTyping = () => {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+    };
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -146,8 +203,6 @@ export default function Home() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let acc = "";
-      let sources: SourceChunk[] | undefined;
 
       while (true) {
         const { value, done } = await reader.read();
@@ -170,36 +225,39 @@ export default function Home() {
           if (ev.type === "sources") {
             sources = ev.data;
           } else if (ev.type === "delta") {
-            acc += ev.text;
+            target += ev.text;
+            startTyping();
           } else if (ev.type === "error") {
             throw new Error(ev.message);
           }
-
-          setMessages((prev) => {
-            const copy = prev.slice();
-            copy[copy.length - 1] = {
-              role: "assistant",
-              content: acc,
-              sources,
-            };
-            return copy;
-          });
         }
       }
+
+      // 스트림 종료 — 버퍼에 남은 글자를 끝까지 흘려보낸 뒤 마무리한다.
+      streamDone = true;
+      startTyping();
+      await typingDone;
     } catch (err) {
+      stopTyping();
       if ((err as Error).name === "AbortError") {
         // 사용자가 '멈춤'을 눌렀다. 지금까지 받은 답은 그대로 남기되,
         // 한 글자도 못 받았으면 빈 말풍선을 제거한다.
-        setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          if (last?.role === "assistant" && !last.content) return prev.slice(0, -1);
-          return prev;
-        });
+        if (target.length === 0) {
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last?.role === "assistant" && !last.content) return prev.slice(0, -1);
+            return prev;
+          });
+        } else {
+          shown = target.length; // 받은 만큼 즉시 모두 표시
+          renderShown();
+        }
       } else {
         setError((err as Error).message);
         setMessages((prev) => prev.slice(0, -1));
       }
     } finally {
+      stopTyping();
       abortRef.current = null;
       setLoading(false);
       textareaRef.current?.focus();
@@ -233,19 +291,14 @@ export default function Home() {
           }`}
         >
         {/* Header */}
-        <header className="flex items-center justify-between px-6 py-4 shrink-0">
+        <header className="flex items-center justify-between px-6 py-4 shrink-0 border-b border-border bg-background/80 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold shadow-lg">
               AI
             </div>
-            <div>
-              <h1 className="text-base font-semibold leading-tight tracking-tight text-foreground">
-                PIMS Chat
-              </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Claude · claude-sonnet-4-6 · RAG (regulation)
-              </p>
-            </div>
+            <h1 className="text-base font-semibold leading-tight tracking-tight text-foreground">
+              PIMS Chat
+            </h1>
           </div>
           <button
             onClick={resetChat}
