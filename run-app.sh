@@ -1,20 +1,18 @@
 #!/usr/bin/env bash
 #
-# Production startup script for the ICT Portal (Next.js) app on macOS/Linux.
+# Dev startup script for the ICT Portal (Next.js) app on macOS/Linux.
 # (run-app.ps1 의 macOS/Linux 판)
 #
-# 프로젝트 루트에서 전체 프로덕션 흐름을 실행한다:
+# 프로젝트 루트에서 개발 서버(HMR)를 실행한다:
 #   1. Node.js / pnpm 존재 확인
 #   2. .env.local 존재 확인
 #   3. 의존성 설치 (pnpm install --frozen-lockfile)
-#   4. 프로덕션 빌드 (pnpm build)
-#   5. 프로덕션 서버 시작 (pnpm start)
+#   4. 개발 서버 시작 (pnpm dev — Hot Reload). ※ 빌드 단계 없음(dev는 온디맨드 컴파일).
 #
 # 옵션:
 #   -p, --port <PORT>   서버 포트 (기본: 3000)
 #       --skip-install  의존성 설치 단계 건너뜀
-#       --skip-build    빌드 건너뛰고 기존 .next 재사용
-#       --no-start      설치/빌드만 하고 서버는 시작하지 않음 (CI·빌드 검증용)
+#       --no-start      설치만 하고 서버는 시작하지 않음
 #   -h, --help          도움말 출력
 #
 # 예시:
@@ -26,7 +24,6 @@ set -euo pipefail
 
 PORT=3000
 SKIP_INSTALL=0
-SKIP_BUILD=0
 NO_START=0
 
 # ── 컬러 출력 (TTY 일 때만) ──────────────────────────────────
@@ -40,7 +37,7 @@ ok()   { printf "%b[OK]  %s%b\n" "$C_GREEN" "$1" "$C_RESET"; }
 fail() { printf "%b[ERR] %s%b\n" "$C_RED" "$1" "$C_RESET" 1>&2; }
 
 usage() {
-  sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,21p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 # ── 인자 파싱 ───────────────────────────────────────────────
@@ -51,7 +48,6 @@ while [ $# -gt 0 ]; do
       PORT="$2"; shift 2 ;;
     --port=*) PORT="${1#*=}"; shift ;;
     --skip-install) SKIP_INSTALL=1; shift ;;
-    --skip-build)   SKIP_BUILD=1; shift ;;
     --no-start)     NO_START=1; shift ;;
     -h|--help)      usage; exit 0 ;;
     *) fail "알 수 없는 옵션: $1"; usage; exit 1 ;;
@@ -101,26 +97,12 @@ else
   ok "Dependencies installed"
 fi
 
-# 5. 빌드
-if [ "$SKIP_BUILD" -eq 1 ]; then
-  step "빌드 건너뜀 (--skip-build)"
-  if [ ! -d "$ROOT/.next" ]; then
-    fail "기존 .next 빌드 결과가 없습니다. --skip-build 없이 먼저 실행하세요."
-    exit 1
-  fi
-else
-  step "프로덕션 빌드 (pnpm build)"
-  pnpm build
-  ok "Build complete"
-fi
-
-# 6. 시작
+# 5. 시작 (dev — 빌드 단계 없음, 온디맨드 컴파일 + HMR)
 if [ "$NO_START" -eq 1 ]; then
-  ok "설치/빌드 완료. 서버 시작은 건너뜀 (--no-start)."
+  ok "설치 완료. 서버 시작은 건너뜀 (--no-start)."
   exit 0
 fi
 
-export NODE_ENV=production
 export PORT="$PORT"
-step "프로덕션 서버 시작: http://localhost:$PORT  (중지하려면 Ctrl+C)"
-exec pnpm start --port "$PORT"
+step "개발 서버 시작(HMR): http://localhost:$PORT  (중지하려면 Ctrl+C)"
+exec pnpm dev --port "$PORT"
