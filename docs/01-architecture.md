@@ -84,7 +84,7 @@
 | 벡터 인덱스 | **HNSW (vector_ip_ops)** | IVFFlat | 2026년 pgvector 권장, 사전 색인 가능 |
 | 임베딩 | **OpenAI `text-embedding-3-small` (1024차원)** | Cohere embed, OpenAI 3-large | 색인·쿼리 동일 모델로 영구 유지, 1024차원으로 pgvector 효율, 안정적 운영 |
 | 리랭킹(재정렬) | **Cohere `rerank-v3.5` multilingual** | Voyage Rerank 2.5, Jina v2 | 한국어 포함 다국어 지원, 검색 후 적합도 재정렬에 특화 |
-| 답변 LLM | **Claude `claude-sonnet-4-6` 단독** | GPT-5.5, Opus 듀얼 | 긴 컨텍스트, 스트리밍·프롬프트 캐싱 지원, Opus 대비 저렴. 평가 후 필요시 Opus 라우팅 추가 |
+| 답변 LLM | **`LLM_PROVIDER` 토글 — Claude `claude-sonnet-4-6`(기본) · OpenAI `OPENAI_MODEL`(기본 gpt-5-nano)** | Opus 듀얼 라우팅 | 정적 env 토글. provider 구현은 `lib/ai/providers/`에 격리(시그니처 불변 → route·UI·RAG·법제처 무관). 기본 Claude는 긴 컨텍스트·스트리밍·프롬프트 캐싱. gpt-5 계열은 max_completion_tokens·reasoning_effort 사용 |
 | 법령 도구 | **법제처 OpenAPI 직접 호출 (자체 구현 도구 `lib/law/`)** | korean-law MCP 런타임 연결 | korean-law MCP는 개발 환경 도구라 Vercel 서버리스에 상주 불가 → 동일 기능을 `lib/law`에 자체 함수로 구현. 법제처 공식 데이터, 실시간 조회, 인용 검증(verify_citations), `law_cache` 캐싱 |
 | 크롤링 | **fetch + cheerio** | Playwright | 정적 HTML 위주. JS 렌더링 필요 사이트만 외부 스크래핑 API 도입 검토 |
 | 한국어 형태소 | **PostgreSQL `simple` config** | pg_bigm, mecab-ko | 1차 PoC는 simple. 평가 결과 부족하면 pg_bigm 추가 |

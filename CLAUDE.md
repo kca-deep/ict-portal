@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Next.js 15 App Router · TypeScript · Tailwind CSS · React 19
 - pnpm 9.12 (packageManager 고정) · Node.js 20+
 - Supabase Postgres + pgvector(1024d, HNSW) + tsvector + RLS
-- Anthropic Claude Sonnet 4.6 (답변 LLM, 단독, 1M context)
+- 답변 LLM: `LLM_PROVIDER` 토글 — 기본 Anthropic Claude Sonnet 4.6(1M context), `openai`로 전환 시 `OPENAI_MODEL`(기본 gpt-5-nano). provider 구현은 `lib/ai/providers/`
 - **임베딩: OpenAI `text-embedding-3-small` (1024d, 색인=쿼리 동일, 영구 고정 — 교체·재색인 없음)**
 - **재정렬: Cohere `rerank-v3.5` (검색 뒤 별도 단계, 임베딩과 무관)**
 - **법령: 법제처 OpenAPI 직접 호출 (자체 구현 도구 — 법령·판례 조회 + 인용 검증, `lib/law/`)**
@@ -38,7 +38,7 @@ pnpm db:reset     # DB 초기화
 
 테스트 셋업 없음 (PoC 단계). 동작 검증은 `pnpm build` + 로컬 `pnpm dev`로 직접 호출.
 
-환경변수는 `.env.local`(로컬) / Vercel(원격). `lib/env.ts`에서 zod로 검증되며, 누락 시 부팅 실패. 필요 키: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`(임베딩), `COHERE_API_KEY`(재정렬), `ANTHROPIC_API_KEY`(LLM), `LAW_GO_KR_API_KEY`(법제처). 임베딩 모델: `EMBEDDING_MODEL=text-embedding-3-small`, `EMBEDDING_DIMENSIONS=1024`.
+환경변수는 `.env.local`(로컬) / Vercel(원격). `lib/env.ts`에서 zod로 검증되며, 누락 시 부팅 실패. 필요 키: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`(임베딩), `COHERE_API_KEY`(재정렬), `ANTHROPIC_API_KEY`(LLM), `LAW_GO_KR_API_KEY`(법제처). 임베딩 모델: `EMBEDDING_MODEL=text-embedding-3-small`, `EMBEDDING_DIMENSIONS=1024`. 답변 LLM 선택: `LLM_PROVIDER`(anthropic 기본/openai), openai 시 `OPENAI_MODEL`(기본 gpt-5-nano)·`OPENAI_REASONING_EFFORT`.
 
 ## 아키텍처 핵심
 
@@ -53,7 +53,7 @@ pnpm db:reset     # DB 초기화
 
 | 모듈 | 역할 |
 |---|---|
-| `lib/ai/` | OpenAI(임베딩) + Cohere(재정렬) + Anthropic(Claude) + 프롬프트. 답변 LLM은 Claude Sonnet 4.6 단독. |
+| `lib/ai/` | OpenAI(임베딩) + Cohere(재정렬) + 답변 LLM. 답변 LLM은 `providers/`(anthropic·openai)를 `LLM_PROVIDER`로 선택, `llm-router.ts`는 프롬프트 조립·게이트 파싱만. |
 | `lib/db/` | Supabase admin/anon 클라이언트 + `hybrid_search` / `regulation_search` RPC 래퍼. |
 | `lib/law/` | 법제처 OpenAPI **직접 호출**(자체 구현: `search_law`·`get_law_text`·`verify_citations`·`search_decisions`·`get_decision_text`, 공통 전송 `client.ts`) + `law_cache` 캐싱. 인용 검증으로 환각 차단. |
 | `lib/crawler/` | ② 정적 HTML fetch + cheerio + AI 비R&D 판별. JS 렌더링 필요 사이트만 외부 스크래핑 도입 검토. |
@@ -67,7 +67,7 @@ pnpm db:reset     # DB 초기화
 | 결정 | 근거 |
 |---|---|
 | LLM은 **상용 API만 사용** | PoC 인프라 단순화. 자체 호스팅 / 내부 모델 제안 금지. |
-| Claude Sonnet 4.6 단독 | 1M context, adaptive thinking, Opus 대비 1.67× 저렴 |
+| 답변 LLM은 `LLM_PROVIDER` 토글(anthropic 기본·openai) | 기본 Claude Sonnet 4.6(1M context·Opus 대비 1.67× 저렴). 정적 env 토글로 OpenAI(`OPENAI_MODEL`, 기본 gpt-5-nano) 양립. 구현은 `lib/ai/providers/`에 격리, route·RAG·법제처 무관 |
 | 임베딩 OpenAI 고정 | 색인=쿼리 동일 모델·차원 필수. 영구 OpenAI(교체·재색인 없음). Cohere는 재정렬 전용 |
 | 법령은 법제처 OpenAPI 직접 호출(자체 구현) | korean-law MCP는 개발(Claude Code) 도구라 Vercel 서버리스 런타임에 상주 불가. 동일 기능(5종 도구)을 `lib/law/`에 자체 함수로 구현. 법제처 공식 조회 + 인용 검증으로 환각 차단, `law_cache` 캐싱 |
 | pgvector + tsvector + RRF | Pinecone 등 별도 인프라 불필요, Supabase 내 완결 |
