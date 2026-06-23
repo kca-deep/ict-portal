@@ -333,7 +333,7 @@ export default function Home() {
           {messages.map((m, i) =>
             m.role === "user" ? (
               <div key={i} className="flex justify-end">
-                <div className="max-w-[78%] rounded-2xl rounded-br-md px-4 py-3 bg-primary text-primary-foreground shadow-lg text-sm leading-relaxed whitespace-pre-wrap break-words">
+                <div className="max-w-[88%] rounded-2xl rounded-br-md px-4 py-3 bg-primary text-primary-foreground shadow-lg text-sm leading-relaxed whitespace-pre-wrap break-words">
                   {m.content}
                 </div>
               </div>
@@ -342,7 +342,7 @@ export default function Home() {
                 <div className="w-8 h-8 shrink-0 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold shadow-md mt-0.5">
                   AI
                 </div>
-                <div className="max-w-[78%] flex flex-col gap-2">
+                <div className="max-w-[88%] flex flex-col gap-2">
                   <div className="rounded-2xl rounded-tl-md px-4 py-3 bg-accent text-accent-foreground shadow-sm break-words">
                     {m.content ? (
                       <Response>{m.content}</Response>
