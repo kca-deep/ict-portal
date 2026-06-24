@@ -17,6 +17,9 @@ const envSchema = z.object({
 
   LLM_MODEL: z.string().default("claude-sonnet-4-6"),
 
+  // ingest 관리자 시크릿 — 미설정 시 /api/ingest 는 항상 403(외부 노출 금지).
+  INGEST_SECRET: z.string().optional(),
+
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
   EMBEDDING_DIMENSIONS: z.coerce.number().default(1024),
   RERANK_MODEL: z.string().default("rerank-v3.5"),
