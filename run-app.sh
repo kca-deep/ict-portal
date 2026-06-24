@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
 #
-# Dev startup script for the ICT Portal (Next.js) app on macOS/Linux.
-# (run-app.ps1 의 macOS/Linux 판)
+# Production startup script for the ICT Portal (Next.js) app on macOS/Linux.
 #
-# 프로젝트 루트에서 개발 서버(HMR)를 실행한다:
-#   1. Node.js / pnpm 존재 확인
-#   2. .env.local 존재 확인
-#   3. 의존성 설치 (pnpm install --frozen-lockfile)
-#   4. 개발 서버 시작 (pnpm dev — Hot Reload). ※ 빌드 단계 없음(dev는 온디맨드 컴파일).
+# Runs the full production flow from the project root:
+#   1. Verifies Node.js and pnpm are available.
+#   2. Verifies the .env.local file exists.
+#   3. Installs dependencies (pnpm install --frozen-lockfile).
+#   4. Builds the production bundle (pnpm build).
+#   5. Starts the Next.js production server (pnpm start).
 #
-# 옵션:
-#   -p, --port <PORT>   서버 포트 (기본: 3000)
-#       --skip-install  의존성 설치 단계 건너뜀
-#       --no-start      설치만 하고 서버는 시작하지 않음
-#   -h, --help          도움말 출력
+# Options:
+#   -p, --port <port>   TCP port the production server listens on. Default: 3000.
+#       --skip-install  Skip the dependency install step.
+#       --skip-build    Skip the build step and reuse the existing .next output.
+#       --no-start      Run install/build only and exit without starting the server.
+#   -h, --help          Show this help and exit.
 #
-# 예시:
+# Examples:
 #   ./run-app.sh
 #   ./run-app.sh --port 8080 --skip-install
 #   ./run-app.sh --no-start
@@ -24,85 +25,100 @@ set -euo pipefail
 
 PORT=3000
 SKIP_INSTALL=0
+SKIP_BUILD=0
 NO_START=0
 
-# ── 컬러 출력 (TTY 일 때만) ──────────────────────────────────
+# --- pretty logging (colors only when stdout is a TTY) ---
 if [ -t 1 ]; then
-  C_CYAN='\033[0;36m'; C_GREEN='\033[0;32m'; C_RED='\033[0;31m'; C_RESET='\033[0m'
+  C_STEP=$'\033[36m'; C_OK=$'\033[32m'; C_ERR=$'\033[31m'; C_RST=$'\033[0m'
 else
-  C_CYAN=''; C_GREEN=''; C_RED=''; C_RESET=''
+  C_STEP=''; C_OK=''; C_ERR=''; C_RST=''
 fi
-step() { printf "%b==> %s%b\n" "$C_CYAN" "$1" "$C_RESET"; }
-ok()   { printf "%b[OK]  %s%b\n" "$C_GREEN" "$1" "$C_RESET"; }
-fail() { printf "%b[ERR] %s%b\n" "$C_RED" "$1" "$C_RESET" 1>&2; }
+write_step() { printf '%s==> %s%s\n' "$C_STEP" "$1" "$C_RST"; }
+write_ok()   { printf '%s[OK]  %s%s\n' "$C_OK"  "$1" "$C_RST"; }
+write_fail() { printf '%s[ERR] %s%s\n' "$C_ERR" "$1" "$C_RST" >&2; }
 
 usage() {
-  sed -n '3,21p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
 }
 
-# ── 인자 파싱 ───────────────────────────────────────────────
+# --- parse args ---
 while [ $# -gt 0 ]; do
   case "$1" in
     -p|--port)
-      if [ $# -lt 2 ]; then fail "--port 에 값이 필요합니다."; exit 1; fi
+      [ $# -ge 2 ] || { write_fail "--port requires a value."; exit 1; }
       PORT="$2"; shift 2 ;;
-    --port=*) PORT="${1#*=}"; shift ;;
     --skip-install) SKIP_INSTALL=1; shift ;;
+    --skip-build)   SKIP_BUILD=1; shift ;;
     --no-start)     NO_START=1; shift ;;
-    -h|--help)      usage; exit 0 ;;
-    *) fail "알 수 없는 옵션: $1"; usage; exit 1 ;;
+    -h|--help)      usage 0 ;;
+    *) write_fail "Unknown argument: $1"; usage 1 ;;
   esac
 done
 
-if ! printf '%s' "$PORT" | grep -Eq '^[0-9]+$'; then
-  fail "포트는 숫자여야 합니다: $PORT"; exit 1
-fi
+case "$PORT" in
+  ''|*[!0-9]*) write_fail "--port must be a number (got '$PORT')."; exit 1 ;;
+esac
 
-# 실패 시 메시지를 빨간색으로 보여 주고 종료.
-trap 'fail "스크립트가 실패했습니다 (line $LINENO)."' ERR
-
-# 항상 스크립트 폴더(프로젝트 루트)에서 동작.
+# Always operate from this script's folder (the project root).
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-step "Project root: $ROOT"
+trap 'write_fail "Script aborted."' ERR
+
+write_step "Project root: $ROOT"
 
 # 1. Node.js
 if ! command -v node >/dev/null 2>&1; then
-  fail "Node.js 를 PATH 에서 찾지 못했습니다. Node.js 20+ 설치 후 다시 실행하세요."
+  write_fail "Node.js was not found on PATH. Install Node.js 20+ and retry."
   exit 1
 fi
-ok "Node.js $(node -v)"
+write_ok "Node.js $(node -v)"
 
 # 2. pnpm
 if ! command -v pnpm >/dev/null 2>&1; then
-  fail "pnpm 을 PATH 에서 찾지 못했습니다. 'npm install -g pnpm' 후 다시 실행하세요. (또는 'corepack enable')"
+  write_fail "pnpm was not found on PATH. Run 'npm install -g pnpm' and retry."
   exit 1
 fi
-ok "pnpm $(pnpm -v)"
+write_ok "pnpm $(pnpm -v)"
 
-# 3. 환경 파일
+# 3. Environment file
 if [ ! -f "$ROOT/.env.local" ]; then
-  fail ".env.local 이 없습니다. .env.local 을 만들고 필요한 키를 채운 뒤 다시 실행하세요."
+  write_fail ".env.local was not found. Copy .env.example to .env.local and fill in the values."
   exit 1
 fi
-ok ".env.local found"
+write_ok ".env.local found"
 
-# 4. 의존성 설치
+# 4. Install dependencies
 if [ "$SKIP_INSTALL" -eq 1 ]; then
-  step "의존성 설치 건너뜀 (--skip-install)"
+  write_step "Skipping dependency install (--skip-install)"
 else
-  step "의존성 설치 (pnpm install --frozen-lockfile)"
+  write_step "Installing dependencies (pnpm install --frozen-lockfile)"
   pnpm install --frozen-lockfile
-  ok "Dependencies installed"
+  write_ok "Dependencies installed"
 fi
 
-# 5. 시작 (dev — 빌드 단계 없음, 온디맨드 컴파일 + HMR)
+# 5. Build
+if [ "$SKIP_BUILD" -eq 1 ]; then
+  write_step "Skipping build (--skip-build)"
+  if [ ! -d "$ROOT/.next" ]; then
+    write_fail "No existing .next build output found. Run without --skip-build first."
+    exit 1
+  fi
+else
+  write_step "Building production bundle (pnpm build)"
+  pnpm build
+  write_ok "Build complete"
+fi
+
+# 6. Start
 if [ "$NO_START" -eq 1 ]; then
-  ok "설치 완료. 서버 시작은 건너뜀 (--no-start)."
+  write_ok "Install/build finished. Server start skipped (--no-start)."
   exit 0
 fi
 
+export NODE_ENV=production
 export PORT="$PORT"
-step "개발 서버 시작(HMR): http://localhost:$PORT  (중지하려면 Ctrl+C)"
-exec pnpm dev --port "$PORT"
+write_step "Starting production server on http://localhost:$PORT  (press Ctrl+C to stop)"
+exec pnpm start --port "$PORT"

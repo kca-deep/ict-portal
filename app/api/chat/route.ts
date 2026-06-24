@@ -22,15 +22,12 @@ import {
   type CitationCheck,
 } from "@/lib/law/verify";
 import { env } from "@/lib/env";
-import { verifyTurnstile } from "@/lib/security/turnstile";
-import { checkRateLimit } from "@/lib/security/ratelimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 type ChatRequest = {
   messages: ChatMessage[];
-  turnstileToken?: string;
 };
 
 export type SourceChunk = {
@@ -138,7 +135,6 @@ function buildPrecedentContext(
 
 function isValidMessages(value: unknown): value is ChatMessage[] {
   if (!Array.isArray(value) || value.length === 0) return false;
-  if (value.length > env.MAX_TURNS) return false;
   return value.every(
     (m) =>
       m &&
@@ -147,28 +143,8 @@ function isValidMessages(value: unknown): value is ChatMessage[] {
       ((m as ChatMessage).role === "user" ||
         (m as ChatMessage).role === "assistant") &&
       typeof (m as ChatMessage).content === "string" &&
-      (m as ChatMessage).content.trim().length > 0 &&
-      (m as ChatMessage).content.length <= env.MAX_CONTENT_CHARS,
+      (m as ChatMessage).content.trim().length > 0,
   );
-}
-
-// 검색·라우팅·게이트·법령 조회용 쿼리를 '맥락 인지'로 구성한다.
-// 멀티턴 후속 발화("난 전담기관이고 제출기관은 전파진흥원이야")는 단독으로는 맥락이 없어
-// 검색·게이트가 어긋난다(답변은 전체 히스토리를 쓰는데 검색은 마지막 메시지만 쓰던 불일치 →
-// 무관 법령 오분기). 최근 user 발화 최대 3개를 합쳐 맥락을 부여한다.
-// 임베딩 입력 보호를 위해 과도하게 길면 최근 쪽을 남기고 자른다.
-// ※ 답변 생성(ragChatStream)은 기존대로 전체 히스토리 사용 — 여기선 검색측 쿼리만 보정.
-const MAX_SEARCH_QUERY_CHARS = 1500;
-function buildSearchQuery(messages: ChatMessage[]): string {
-  const recent = messages
-    .filter((m) => m.role === "user")
-    .map((m) => m.content.trim())
-    .filter(Boolean)
-    .slice(-3)
-    .join("\n");
-  return recent.length > MAX_SEARCH_QUERY_CHARS
-    ? recent.slice(recent.length - MAX_SEARCH_QUERY_CHARS)
-    : recent;
 }
 
 export async function POST(req: NextRequest) {
@@ -185,24 +161,11 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Turnstile 게이트(활성 시). 비활성/키부재면 verifyTurnstile 이 즉시 true.
-  const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  if (!(await verifyTurnstile(body.turnstileToken, clientIp))) {
-    return new Response("bot verification failed", { status: 403 });
-  }
-
-  // 레이트리밋(활성 시). 비활성이면 checkRateLimit 이 즉시 통과.
-  if (!(await checkRateLimit(clientIp)).ok) {
-    return new Response("rate limit exceeded", { status: 429 });
-  }
-
   const lastUser = [...body.messages].reverse().find((m) => m.role === "user");
   if (!lastUser) {
     return new Response("last user message required", { status: 400 });
   }
-  // 검색·라우팅·게이트·법령 쿼리는 맥락 인지(최근 user 발화 결합). 답변은 ragChatStream 이
-  // 전체 히스토리로 별도 생성하므로 여기 query 는 '검색측'에만 영향.
-  const query = buildSearchQuery(body.messages);
+  const query = lastUser.content.trim();
 
   const encoder = new TextEncoder();
   const send = (controller: ReadableStreamDefaultController, ev: StreamEvent) => {
@@ -325,29 +288,20 @@ export async function POST(req: NextRequest) {
             score: 1,
           }));
 
-        // 7) 라우팅·참조문서 전송. 표시는 "답변의 검증된 근거"를 따른다.
-        //    법령 분기였어도 답변이 실제로 인용·검증된 법령 조문이 하나도 없으면
-        //    (citationSources=0), 그 답변은 사실상 규정 기반(RAG)이다 — 이때 검색이
-        //    끌어온 무관한 raw 법령(lawSources)을 보여 주면 '답변=규정 / 참조=법령'
-        //    불일치가 생긴다. 그래서 검증된 법령 인용이 있을 때만 법령으로 취급한다.
+        // 7) 라우팅·참조문서 전송. 법령 분기면 인용 조문(있으면)을, 없으면 검색 조문을,
+        //    규정 분기면 규정 청크를 참조문서로 표시.
         //    범위 밖이면 참조문서를 일절 표시하지 않는다(빈 배열).
-        const lawGrounded = routedToLaw && citationSources.length > 0;
-        if (routedToLaw && !lawGrounded) {
-          // 법령 분기였지만 답변이 검증된 법령 조문을 하나도 인용하지 않음(=규정 기반 RAG).
-          // 무관한 검색 법령 대신 규정 청크를 참조문서로 표시한다(참조-답변 일치).
-          console.log(
-            `[chat] law branch → no verified citation, displaying as regulation (regSources=${sources.length})`,
-          );
-        }
         const displayedSources = outOfScope
           ? []
-          : lawGrounded
-            ? [...citationSources, ...precedentSources]
+          : routedToLaw
+            ? citationSources.length > 0
+              ? [...citationSources, ...precedentSources]
+              : [...lawSources, ...precedentSources]
             : sources;
         if (!outOfScope) {
           send(
             controller,
-            lawGrounded
+            routedToLaw
               ? { type: "routing", route: "law", score: maxScore, laws: lawRefs }
               : { type: "routing", route: "regulation", score: maxScore },
           );
@@ -370,13 +324,7 @@ export async function POST(req: NextRequest) {
 
         send(controller, { type: "done" });
       } catch (err) {
-        // 내부 오류 메시지(DB 디테일·SDK 에러 등)는 클라이언트에 노출하지 않는다.
-        // 실제 원인은 서버 로그로만 남기고, 사용자에겐 일반화 메시지를 전송한다.
-        console.error("[chat] stream failed:", (err as Error).message);
-        send(controller, {
-          type: "error",
-          message: "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
-        });
+        send(controller, { type: "error", message: (err as Error).message });
       } finally {
         controller.close();
       }

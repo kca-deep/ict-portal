@@ -1,23 +1,28 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Dev startup script for the ICT Portal (Next.js) app on Windows.
+    Production startup script for the ICT Portal (Next.js) app on Windows.
 
 .DESCRIPTION
-    Runs the dev server (HMR) from the project root:
+    Runs the full production flow from the project root:
       1. Verifies Node.js and pnpm are available.
       2. Verifies the .env.local file exists.
       3. Installs dependencies (pnpm install --frozen-lockfile).
-      4. Starts the Next.js dev server (pnpm dev — Hot Reload). No build step (on-demand compile).
+      4. Builds the production bundle (pnpm build).
+      5. Starts the Next.js production server (pnpm start).
 
 .PARAMETER Port
-    TCP port the dev server listens on. Default: 3000.
+    TCP port the production server listens on. Default: 3000.
 
 .PARAMETER SkipInstall
     Skip the dependency install step.
 
+.PARAMETER SkipBuild
+    Skip the build step and reuse the existing .next output.
+
 .PARAMETER NoStart
-    Run install only and exit without starting the server.
+    Run install/build only and exit without starting the server.
+    Useful for CI or for validating the build.
 
 .EXAMPLE
     .\run-app.ps1
@@ -33,6 +38,7 @@
 param(
     [int]$Port = 3000,
     [switch]$SkipInstall,
+    [switch]$SkipBuild,
     [switch]$NoStart
 )
 
@@ -82,16 +88,31 @@ try {
         Write-Ok "Dependencies installed"
     }
 
-    # 5. Start (dev — no build step, on-demand compile + HMR)
+    # 5. Build
+    if ($SkipBuild) {
+        Write-Step "Skipping build (-SkipBuild)"
+        if (-not (Test-Path -LiteralPath (Join-Path $Root '.next'))) {
+            throw "No existing .next build output found. Run without -SkipBuild first."
+        }
+    }
+    else {
+        Write-Step "Building production bundle (pnpm build)"
+        & pnpm build
+        if ($LASTEXITCODE -ne 0) { throw "pnpm build failed (exit code $LASTEXITCODE)." }
+        Write-Ok "Build complete"
+    }
+
+    # 6. Start
     if ($NoStart) {
-        Write-Ok "Install finished. Server start skipped (-NoStart)."
+        Write-Ok "Install/build finished. Server start skipped (-NoStart)."
         exit 0
     }
 
+    $env:NODE_ENV = 'production'
     $env:PORT = "$Port"
-    Write-Step "Starting dev server (HMR) on http://localhost:$Port  (press Ctrl+C to stop)"
-    & pnpm dev --port $Port
-    if ($LASTEXITCODE -ne 0) { throw "pnpm dev exited with code $LASTEXITCODE." }
+    Write-Step "Starting production server on http://localhost:$Port  (press Ctrl+C to stop)"
+    & pnpm start --port $Port
+    if ($LASTEXITCODE -ne 0) { throw "pnpm start exited with code $LASTEXITCODE." }
 }
 catch {
     Write-Fail $_.Exception.Message

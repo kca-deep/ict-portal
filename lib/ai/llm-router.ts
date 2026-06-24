@@ -1,28 +1,13 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { env } from "@/lib/env";
 import {
+  CHAT_SYSTEM_PROMPT,
   RELEVANCE_GATE_PROMPT,
   SCOPE_GATE_PROMPT,
   SYSTEM_PROMPT,
 } from "@/lib/ai/prompts";
-import type { ChatMessage, ChatProvider } from "@/lib/ai/providers/types";
-import { anthropicProvider } from "@/lib/ai/providers/anthropic";
-import { openaiProvider } from "@/lib/ai/providers/openai";
 
-// route·UI 가 기존대로 import 하도록 재노출 (provider 경계로 옮겨도 시그니처 불변).
-export type { ChatMessage } from "@/lib/ai/providers/types";
-
-// 게이트 응답 한도. 추론 모델(gpt-5)은 한도를 추론에 먼저 쓰므로 YES/NO 가 비지 않도록
-// 여유를 둔다. max_completion_tokens/max_tokens 모두 상한일 뿐이라 Anthropic 비용엔 영향 없음.
-const GATE_MAX_TOKENS = 256;
-// 답변 한도. gpt-5 계열은 max_completion_tokens 가 '추론+출력' 합산이라, reasoning_effort 를
-// 올리면 추론이 한도를 잠식해 출력(답변)이 짧아진다. 추론+출력 헤드룸을 넉넉히 둔다.
-// (상한일 뿐 — 프롬프트가 분량을 통제하므로 Anthropic·OpenAI 모두 무해.)
-const ANSWER_MAX_TOKENS = 16000;
-
-// env.LLM_PROVIDER 로 답변 LLM 구현체 하나를 고정 선택(정적 토글).
-function getProvider(): ChatProvider {
-  return env.LLM_PROVIDER === "openai" ? openaiProvider : anthropicProvider;
-}
+const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
 export type RetrievedDoc = {
   title?: string | null;
@@ -35,6 +20,11 @@ export type ChatContext = {
   query: string;
   retrievedDocs: RetrievedDoc[];
   lawContext?: string;
+};
+
+export type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
 };
 
 function buildContextBlock(ctx: ChatContext): string {
@@ -71,13 +61,20 @@ export async function isRegulationSufficient(
     const context = retrievedDocs
       .map((d, i) => `[자료 ${i + 1}] ${d.title ?? ""}\n${d.content}`)
       .join("\n\n");
-    const text = (
-      await getProvider().complete({
-        system: RELEVANCE_GATE_PROMPT,
-        user: `질문: ${query}\n\n<내부규정>\n${context}\n</내부규정>\n\n위 내부 규정만으로 질문의 핵심에 답할 수 있으면 YES, 핵심 근거가 없으면 NO. 한 단어만.`,
-        maxTokens: GATE_MAX_TOKENS,
-      })
-    )
+    const res = await anthropic.messages.create({
+      model: env.LLM_MODEL,
+      max_tokens: 8,
+      system: [{ type: "text", text: RELEVANCE_GATE_PROMPT }],
+      messages: [
+        {
+          role: "user",
+          content: `질문: ${query}\n\n<내부규정>\n${context}\n</내부규정>\n\n위 내부 규정만으로 질문의 핵심에 답할 수 있으면 YES, 핵심 근거가 없으면 NO. 한 단어만.`,
+        },
+      ],
+    });
+    const text = res.content
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("")
       .trim()
       .toUpperCase();
     return !text.startsWith("NO");
@@ -99,13 +96,20 @@ export async function isRegulationSufficient(
 export async function isInScope(query: string): Promise<boolean> {
   if (!query.trim()) return false;
   try {
-    const text = (
-      await getProvider().complete({
-        system: SCOPE_GATE_PROMPT,
-        user: `질문: ${query}\n\n위 질문이 이 서비스(ICT기금 규정·법령·행정) 안내 범위에 속하면 YES, 무관하면 NO. 한 단어만.`,
-        maxTokens: GATE_MAX_TOKENS,
-      })
-    )
+    const res = await anthropic.messages.create({
+      model: env.LLM_MODEL,
+      max_tokens: 8,
+      system: [{ type: "text", text: SCOPE_GATE_PROMPT }],
+      messages: [
+        {
+          role: "user",
+          content: `질문: ${query}\n\n위 질문이 이 서비스(ICT기금 규정·법령·행정) 안내 범위에 속하면 YES, 무관하면 NO. 한 단어만.`,
+        },
+      ],
+    });
+    const text = res.content
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("")
       .trim()
       .toUpperCase();
     return !text.startsWith("NO");
@@ -115,6 +119,58 @@ export async function isInScope(query: string): Promise<boolean> {
       (err as Error).message,
     );
     return true;
+  }
+}
+
+export async function* answerStream(ctx: ChatContext): AsyncGenerator<string> {
+  // SDK 0.32.1 타입이 thinking/cache_control 누락 — 런타임은 정상. TODO: SDK 업그레이드 후 cast 제거.
+  const stream = anthropic.messages.stream({
+    model: env.LLM_MODEL,
+    max_tokens: 16000,
+    thinking: { type: "adaptive" },
+    system: [
+      {
+        type: "text",
+        text: SYSTEM_PROMPT,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    messages: [{ role: "user", content: buildUserMessage(ctx) }],
+  } as unknown as Anthropic.MessageStreamParams);
+
+  for await (const event of stream) {
+    if (
+      event.type === "content_block_delta" &&
+      event.delta.type === "text_delta"
+    ) {
+      yield event.delta.text;
+    }
+  }
+}
+
+export async function* chatStream(
+  messages: ChatMessage[],
+): AsyncGenerator<string> {
+  const stream = anthropic.messages.stream({
+    model: env.LLM_MODEL,
+    max_tokens: 4096,
+    system: [
+      {
+        type: "text",
+        text: CHAT_SYSTEM_PROMPT,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+  });
+
+  for await (const event of stream) {
+    if (
+      event.type === "content_block_delta" &&
+      event.delta.type === "text_delta"
+    ) {
+      yield event.delta.text;
+    }
   }
 }
 
@@ -142,9 +198,25 @@ export async function* ragChatStream(
 
   const finalMessages = [...messages.slice(0, lastIdx), augmented];
 
-  yield* getProvider().stream({
-    system: SYSTEM_PROMPT,
-    messages: finalMessages,
-    maxTokens: ANSWER_MAX_TOKENS,
+  const stream = anthropic.messages.stream({
+    model: env.LLM_MODEL,
+    max_tokens: 4096,
+    system: [
+      {
+        type: "text",
+        text: SYSTEM_PROMPT,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
+    messages: finalMessages.map((m) => ({ role: m.role, content: m.content })),
   });
+
+  for await (const event of stream) {
+    if (
+      event.type === "content_block_delta" &&
+      event.delta.type === "text_delta"
+    ) {
+      yield event.delta.text;
+    }
+  }
 }
