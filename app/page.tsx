@@ -1,7 +1,6 @@
 "use client";
 
-import Image from "next/image";
-import { SquarePen, Copy, Check } from "lucide-react";
+import { SquarePen, Copy, Check, ArrowUp, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Response } from "@/components/ui/response";
 import {
@@ -97,6 +96,22 @@ export default function Home() {
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight });
   }, [messages]);
+
+  // 입력창 자동 높이: 첫 화면(대화 전)은 3행에서 시작, 대화 중에는 1행에서 시작.
+  // 내용이 길어지면 늘어나고 5행에서 멈춘 뒤 내부 스크롤로 전환한다.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const LINE = 20; // text-sm leading-5 (1.25rem)
+    const PAD = 24; // py-3 위아래 12px
+    const minRows = messages.length === 0 ? 3 : 1;
+    el.style.height = "auto";
+    const min = minRows * LINE + PAD;
+    const max = 5 * LINE + PAD;
+    const next = Math.min(Math.max(el.scrollHeight, min), max);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
+  }, [input, messages.length]);
 
   // Esc로 근거 패널 닫기.
   useEffect(() => {
@@ -275,6 +290,46 @@ export default function Home() {
     setActiveSource(null);
   }
 
+  // 버튼 세로 위치: 첫 화면(3행 박스)은 세로 중앙, 대화 중(1행 시작)은 하단 고정.
+  const composerBtnPos =
+    messages.length === 0 ? "top-1/2 -translate-y-1/2" : "bottom-1";
+
+  // 중앙(첫 화면)·하단(대화 중) 어디서든 동일하게 쓰는 입력창. 높이는 위 effect가 제어.
+  const composer = (
+    <div className="relative">
+      <textarea
+        ref={textareaRef}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder="메시지를 입력하세요…"
+        rows={messages.length === 0 ? 3 : 1}
+        className="w-full resize-none rounded-2xl pl-4 pr-14 py-3 text-sm leading-5 bg-card text-card-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring shadow-lg"
+        disabled={loading}
+      />
+      {loading ? (
+        <button
+          onClick={stop}
+          aria-label="멈춤"
+          title="멈춤"
+          className={`absolute right-2 ${composerBtnPos} inline-flex items-center justify-center w-9 h-9 rounded-full bg-destructive text-destructive-foreground shadow-md transition-opacity hover:opacity-90`}
+        >
+          <Square className="w-4 h-4 fill-current" aria-hidden />
+        </button>
+      ) : (
+        <button
+          onClick={send}
+          disabled={!input.trim()}
+          aria-label="전송"
+          title="전송"
+          className={`absolute right-2 ${composerBtnPos} inline-flex items-center justify-center w-9 h-9 rounded-full bg-primary text-primary-foreground shadow-md transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed`}
+        >
+          <ArrowUp className="w-5 h-5" aria-hidden />
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <main className="flex h-screen bg-background">
       <div className="flex-1 flex flex-col h-full min-w-0">
@@ -286,17 +341,35 @@ export default function Home() {
         {/* Header */}
         <header className="flex items-center justify-between px-6 py-4 shrink-0 border-b border-border bg-background/80 backdrop-blur-sm">
           <div className="flex items-center gap-3">
-            <Image
-              src="/pims-logo.png"
-              alt="PIMS 어드바이저 로고"
-              width={40}
-              height={40}
-              priority
+            <svg
+              viewBox="0 0 256 256"
+              role="img"
+              aria-label="PIMS 어드바이저 로고"
               className="w-10 h-10 shrink-0"
-            />
+            >
+              <rect width="128" height="128" fill="#27349C" />
+              <rect x="128" width="128" height="128" fill="#2E6FE0" />
+              <rect y="128" width="128" height="128" fill="#1C8FC9" />
+              <rect x="128" y="128" width="128" height="128" fill="#159B8E" />
+              <g
+                fill="#ffffff"
+                fontFamily="'Helvetica Neue', Arial, sans-serif"
+                fontWeight="700"
+                fontSize="80"
+                textAnchor="middle"
+              >
+                <text x="64" y="92">P</text>
+                <text x="192" y="92">I</text>
+                <text x="64" y="220">M</text>
+                <text x="192" y="220">S</text>
+              </g>
+            </svg>
             <div>
-              <h1 className="text-base font-semibold leading-tight tracking-tight text-foreground">
-                PIMS 어드바이저
+              <h1
+                className="text-2xl italic leading-none tracking-tight text-foreground"
+                style={{ fontFamily: "var(--font-display)" }}
+              >
+                AI Advisor
               </h1>
               <p className="text-xs text-muted-foreground mt-0.5">
                 ICT기금 규정·지침·법령 안내
@@ -314,27 +387,28 @@ export default function Home() {
           </button>
         </header>
 
-        {/* Conversation */}
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          className="flex-1 overflow-y-auto px-6 py-6 space-y-4"
-        >
-          {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full text-center">
-              <div className="w-16 h-16 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-lg font-bold tracking-tight shadow-xl mb-5">
-                PIMS
-              </div>
-              <p className="font-semibold text-foreground text-lg">
-                무엇이든 물어보세요
+        {messages.length === 0 ? (
+          /* 첫 화면: 인사말 + 입력창을 화면 정중앙에 배치 (ChatGPT·Claude·Gemini 방식) */
+          <div className="flex-1 flex flex-col items-center justify-center px-4">
+            <div className="w-full max-w-2xl flex flex-col items-center text-center">
+              <p
+                className="mb-6 text-3xl italic tracking-tight text-foreground"
+                style={{ fontFamily: "var(--font-display)" }}
+              >
+                무엇을 도와드릴까요?
               </p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                ICT기금 규정 RAG 기반 답변 · Shift+Enter 줄바꿈 · Enter 전송
-              </p>
+              <div className="w-full">{composer}</div>
             </div>
-          )}
-
-          {messages.map((m, i) =>
+          </div>
+        ) : (
+          <>
+            {/* Conversation */}
+            <div
+              ref={scrollRef}
+              onScroll={handleScroll}
+              className="flex-1 overflow-y-auto px-6 py-6 space-y-4"
+            >
+              {messages.map((m, i) =>
             m.role === "user" ? (
               <div key={i} className="flex justify-end">
                 <div className="max-w-[88%] rounded-2xl rounded-br-md px-4 py-3 bg-primary text-primary-foreground shadow-lg text-sm leading-relaxed whitespace-pre-wrap break-words">
@@ -386,45 +460,20 @@ export default function Home() {
           )}
         </div>
 
-        {/* Input */}
-        <div className="px-4 py-4 shrink-0 relative">
-          {!atBottom && messages.length > 0 && (
-            <button
-              onClick={scrollToBottom}
-              className="absolute -top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1 rounded-full bg-card text-card-foreground text-xs font-medium px-3 py-1.5 shadow-lg border border-border hover:bg-muted/40 transition-colors"
-            >
-              ↓ 최신으로
-            </button>
-          )}
-          <div className="flex gap-2 items-end">
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="메시지를 입력하세요…"
-              rows={1}
-              className="flex-1 resize-none rounded-2xl px-4 py-3 text-sm bg-card text-card-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring shadow-lg max-h-40"
-              disabled={loading}
-            />
-            {loading ? (
-              <button
-                onClick={stop}
-                className="rounded-2xl bg-destructive text-destructive-foreground text-sm font-semibold px-5 py-3 shadow-lg transition-opacity hover:opacity-90"
-              >
-                멈춤
-              </button>
-            ) : (
-              <button
-                onClick={send}
-                disabled={!input.trim()}
-                className="rounded-2xl bg-primary text-primary-foreground text-sm font-semibold px-5 py-3 shadow-lg transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                전송
-              </button>
-            )}
-          </div>
-        </div>
+            {/* Input */}
+            <div className="px-4 py-4 shrink-0 relative">
+              {!atBottom && (
+                <button
+                  onClick={scrollToBottom}
+                  className="absolute -top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1 rounded-full bg-card text-card-foreground text-xs font-medium px-3 py-1.5 shadow-lg border border-border hover:bg-muted/40 transition-colors"
+                >
+                  ↓ 최신으로
+                </button>
+              )}
+              {composer}
+            </div>
+          </>
+        )}
         </div>
       </div>
 
