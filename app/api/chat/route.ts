@@ -22,6 +22,7 @@ import {
   type CitationCheck,
 } from "@/lib/law/verify";
 import { env } from "@/lib/env";
+import { checkRateLimit } from "@/lib/security/ratelimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -135,6 +136,7 @@ function buildPrecedentContext(
 
 function isValidMessages(value: unknown): value is ChatMessage[] {
   if (!Array.isArray(value) || value.length === 0) return false;
+  if (value.length > env.MAX_TURNS) return false;
   return value.every(
     (m) =>
       m &&
@@ -143,7 +145,8 @@ function isValidMessages(value: unknown): value is ChatMessage[] {
       ((m as ChatMessage).role === "user" ||
         (m as ChatMessage).role === "assistant") &&
       typeof (m as ChatMessage).content === "string" &&
-      (m as ChatMessage).content.trim().length > 0,
+      (m as ChatMessage).content.trim().length > 0 &&
+      (m as ChatMessage).content.length <= env.MAX_CONTENT_CHARS,
   );
 }
 
@@ -159,6 +162,12 @@ export async function POST(req: NextRequest) {
     return new Response("messages required: [{role, content}]", {
       status: 400,
     });
+  }
+
+  // 레이트리밋(활성 시). 비활성이면 checkRateLimit 이 즉시 통과(기존 동작 유지).
+  const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  if (!(await checkRateLimit(clientIp)).ok) {
+    return new Response("rate limit exceeded", { status: 429 });
   }
 
   const lastUser = [...body.messages].reverse().find((m) => m.role === "user");

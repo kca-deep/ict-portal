@@ -20,6 +20,15 @@ const envSchema = z.object({
   // ingest 관리자 시크릿 — 미설정 시 /api/ingest 는 항상 403(외부 노출 금지).
   INGEST_SECRET: z.string().optional(),
 
+  // 입력 캡 — 한 요청의 대화 턴 수·메시지 글자 수 상한(비용/남용 방지).
+  MAX_TURNS: z.coerce.number().default(30),
+  MAX_CONTENT_CHARS: z.coerce.number().default(8000),
+
+  // IP 레이트리밋 — RATE_LIMIT_ENABLED="true" 일 때만 활성(기본 비활성, 기존 동작 유지).
+  RATE_LIMIT_ENABLED: z.string().optional(),
+  RATE_LIMIT_PER_MIN: z.coerce.number().default(20),
+  RATE_LIMIT_DAILY_CAP: z.coerce.number().default(2000),
+
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
   EMBEDDING_DIMENSIONS: z.coerce.number().default(1024),
   RERANK_MODEL: z.string().default("rerank-v3.5"),
