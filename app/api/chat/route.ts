@@ -152,6 +152,25 @@ function isValidMessages(value: unknown): value is ChatMessage[] {
   );
 }
 
+// 검색·라우팅·게이트·법령 조회용 쿼리를 '맥락 인지'로 구성한다.
+// 멀티턴 후속 발화("난 전담기관이고 제출기관은 전파진흥원이야")는 단독으로는 맥락이 없어
+// 검색·게이트가 어긋난다(답변은 전체 히스토리를 쓰는데 검색은 마지막 메시지만 쓰던 불일치 →
+// 무관 법령 오분기). 최근 user 발화 최대 3개를 합쳐 맥락을 부여한다.
+// 임베딩 입력 보호를 위해 과도하게 길면 최근 쪽을 남기고 자른다.
+// ※ 답변 생성(ragChatStream)은 기존대로 전체 히스토리 사용 — 여기선 검색측 쿼리만 보정.
+const MAX_SEARCH_QUERY_CHARS = 1500;
+function buildSearchQuery(messages: ChatMessage[]): string {
+  const recent = messages
+    .filter((m) => m.role === "user")
+    .map((m) => m.content.trim())
+    .filter(Boolean)
+    .slice(-3)
+    .join("\n");
+  return recent.length > MAX_SEARCH_QUERY_CHARS
+    ? recent.slice(recent.length - MAX_SEARCH_QUERY_CHARS)
+    : recent;
+}
+
 export async function POST(req: NextRequest) {
   let body: ChatRequest;
   try {
@@ -181,7 +200,9 @@ export async function POST(req: NextRequest) {
   if (!lastUser) {
     return new Response("last user message required", { status: 400 });
   }
-  const query = lastUser.content.trim();
+  // 검색·라우팅·게이트·법령 쿼리는 맥락 인지(최근 user 발화 결합). 답변은 ragChatStream 이
+  // 전체 히스토리로 별도 생성하므로 여기 query 는 '검색측'에만 영향.
+  const query = buildSearchQuery(body.messages);
 
   const encoder = new TextEncoder();
   const send = (controller: ReadableStreamDefaultController, ev: StreamEvent) => {
@@ -304,20 +325,29 @@ export async function POST(req: NextRequest) {
             score: 1,
           }));
 
-        // 7) 라우팅·참조문서 전송. 법령 분기면 인용 조문(있으면)을, 없으면 검색 조문을,
-        //    규정 분기면 규정 청크를 참조문서로 표시.
+        // 7) 라우팅·참조문서 전송. 표시는 "답변의 검증된 근거"를 따른다.
+        //    법령 분기였어도 답변이 실제로 인용·검증된 법령 조문이 하나도 없으면
+        //    (citationSources=0), 그 답변은 사실상 규정 기반(RAG)이다 — 이때 검색이
+        //    끌어온 무관한 raw 법령(lawSources)을 보여 주면 '답변=규정 / 참조=법령'
+        //    불일치가 생긴다. 그래서 검증된 법령 인용이 있을 때만 법령으로 취급한다.
         //    범위 밖이면 참조문서를 일절 표시하지 않는다(빈 배열).
+        const lawGrounded = routedToLaw && citationSources.length > 0;
+        if (routedToLaw && !lawGrounded) {
+          // 법령 분기였지만 답변이 검증된 법령 조문을 하나도 인용하지 않음(=규정 기반 RAG).
+          // 무관한 검색 법령 대신 규정 청크를 참조문서로 표시한다(참조-답변 일치).
+          console.log(
+            `[chat] law branch → no verified citation, displaying as regulation (regSources=${sources.length})`,
+          );
+        }
         const displayedSources = outOfScope
           ? []
-          : routedToLaw
-            ? citationSources.length > 0
-              ? [...citationSources, ...precedentSources]
-              : [...lawSources, ...precedentSources]
+          : lawGrounded
+            ? [...citationSources, ...precedentSources]
             : sources;
         if (!outOfScope) {
           send(
             controller,
-            routedToLaw
+            lawGrounded
               ? { type: "routing", route: "law", score: maxScore, laws: lawRefs }
               : { type: "routing", route: "regulation", score: maxScore },
           );
