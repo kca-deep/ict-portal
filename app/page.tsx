@@ -326,8 +326,8 @@ export default function Home() {
         >
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-center">
-              <div className="w-16 h-16 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold shadow-xl mb-5">
-                AI
+              <div className="w-16 h-16 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-lg font-bold tracking-tight shadow-xl mb-5">
+                PIMS
               </div>
               <p className="font-semibold text-foreground text-lg">
                 무엇이든 물어보세요
@@ -346,11 +346,8 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <div key={i} className="flex justify-start gap-2.5">
-                <div className="w-8 h-8 shrink-0 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold shadow-md mt-0.5">
-                  AI
-                </div>
-                <div className="max-w-[88%] flex flex-col gap-2">
+              <div key={i} className="flex justify-start">
+                <div className="max-w-[92%] flex flex-col gap-2">
                   <div className="rounded-2xl rounded-tl-md px-4 py-3 bg-accent text-accent-foreground shadow-sm break-words">
                     {m.content ? (
                       <Response>{m.content}</Response>
