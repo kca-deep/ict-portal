@@ -41,7 +41,7 @@ export const Response = memo(
         data-slot="response"
         plugins={mergedPlugins}
         className={cn(
-          "text-sm leading-relaxed [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          "text-sm leading-snug [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_li]:py-0.5 [&>*+*]:!mt-3",
           className,
         )}
         {...props}

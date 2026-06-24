@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { SquarePen } from "lucide-react";
+import { SquarePen, Copy, Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Response } from "@/components/ui/response";
 import {
@@ -15,6 +15,7 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   sources?: SourceChunk[];
+  responseMs?: number;
 };
 
 type StreamEvent =
@@ -138,6 +139,7 @@ export default function Home() {
     let stopped = false;
 
     try {
+      const startedAt = performance.now();
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -166,10 +168,16 @@ export default function Home() {
       let lastLen = -1;
       let lastSources: SourceChunk[] | undefined;
 
-      const paint = (content: string) => {
+      const paint = (content: string, responseMs?: number) => {
         setMessages((prev) => {
           const copy = prev.slice();
-          copy[copy.length - 1] = { role: "assistant", content, sources };
+          const prevMsg = copy[copy.length - 1];
+          copy[copy.length - 1] = {
+            role: "assistant",
+            content,
+            sources,
+            responseMs: responseMs ?? prevMsg?.responseMs,
+          };
           return copy;
         });
       };
@@ -180,7 +188,7 @@ export default function Home() {
           // 네트워크 종료 시 남은 backlog 를 한 번에 확정 표시하고 종료
           // (탭 비활성으로 rAF 가 멈춰 await 가 영구 대기하는 것을 방지).
           if (streamDone) {
-            paint(target);
+            paint(target, Math.round(performance.now() - startedAt));
             return resolve();
           }
           const backlog = target.length - displayed;
@@ -229,7 +237,7 @@ export default function Home() {
         }
       }
       streamDone = true;
-      await drain;
+      await drain; // 응답 시간은 최종 paint(streamDone 분기)에서 함께 기록된다.
     } catch (err) {
       if ((err as Error).name === "AbortError") {
         // 사용자가 '멈춤'을 눌렀다. 지금까지 받은 답은 그대로 남기되,
@@ -353,10 +361,17 @@ export default function Home() {
                         <span className="w-1.5 h-1.5 rounded-full bg-accent-foreground animate-bounce" />
                       </span>
                     )}
+                    {m.content && !(loading && i === messages.length - 1) && (
+                      <div className="mt-2 flex items-center gap-2">
+                        {m.responseMs != null && (
+                          <span className="text-[11px] text-muted-foreground tabular-nums">
+                            응답 {(m.responseMs / 1000).toFixed(1)}초
+                          </span>
+                        )}
+                        <CopyButton text={m.content} />
+                      </div>
+                    )}
                   </div>
-                  {m.content && !(loading && i === messages.length - 1) && (
-                    <CopyButton text={m.content} />
-                  )}
                   {m.sources && m.sources.length > 0 && (
                     <Sources
                       sources={m.sources}
@@ -447,48 +462,18 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={copy}
-      className={`self-start inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium shadow-sm transition-colors ${
+      className={`inline-flex items-center justify-center rounded-md p-1 transition-colors ${
         copied
-          ? "border-primary/30 bg-primary/10 text-primary"
-          : "border-border bg-card text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+          ? "text-primary"
+          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
       }`}
-      title="답변 복사"
+      aria-label={copied ? "복사됨" : "답변 복사"}
+      title={copied ? "복사됨" : "답변 복사"}
     >
       {copied ? (
-        <>
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <path d="M20 6 9 17l-5-5" />
-          </svg>
-          복사됨
-        </>
+        <Check className="w-3.5 h-3.5" aria-hidden />
       ) : (
-        <>
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <rect x="9" y="9" width="13" height="13" rx="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-          복사
-        </>
+        <Copy className="w-3.5 h-3.5" aria-hidden />
       )}
     </button>
   );
