@@ -13,8 +13,11 @@ export type { ChatMessage } from "@/lib/ai/providers/types";
 
 // 게이트 응답 한도. 추론 모델(gpt-5)은 한도를 추론에 먼저 쓰므로 YES/NO 가 비지 않도록
 // 여유를 둔다. max_completion_tokens/max_tokens 모두 상한일 뿐이라 Anthropic 비용엔 영향 없음.
-const GATE_MAX_TOKENS = 64;
-const ANSWER_MAX_TOKENS = 4096;
+const GATE_MAX_TOKENS = 256;
+// 답변 한도. gpt-5 계열은 max_completion_tokens 가 '추론+출력' 합산이라, reasoning_effort 를
+// 올리면 추론이 한도를 잠식해 출력(답변)이 짧아진다. 추론+출력 헤드룸을 넉넉히 둔다.
+// (상한일 뿐 — 프롬프트가 분량을 통제하므로 Anthropic·OpenAI 모두 무해.)
+const ANSWER_MAX_TOKENS = 16000;
 
 // env.LLM_PROVIDER 로 답변 LLM 구현체 하나를 고정 선택(정적 토글).
 function getProvider(): ChatProvider {

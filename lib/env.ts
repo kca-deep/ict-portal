@@ -23,7 +23,7 @@ const envSchema = z.object({
   OPENAI_MODEL: z.string().default("gpt-5-nano"),
   OPENAI_REASONING_EFFORT: z
     .enum(["minimal", "low", "medium", "high"])
-    .default("minimal"),
+    .default("low"),
 
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
   EMBEDDING_DIMENSIONS: z.coerce.number().default(1024),

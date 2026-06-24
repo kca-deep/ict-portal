@@ -39,10 +39,11 @@ export const openaiProvider: ChatProvider = {
   async complete({ system, user, maxTokens }: CompleteOpts) {
     const res = await client().chat.completions.create({
       model: env.OPENAI_MODEL,
-      // 추론 모델은 한도를 추론 토큰에 먼저 쓴다 — 게이트 호출이 너무 작은 한도면
-      // 본문(YES/NO)이 비어 나온다. 충분한 한도는 llm-router(GATE_MAX_TOKENS)에서 보장.
+      // 게이트(YES/NO 분류)는 추론이 불필요하다. 답변용 reasoning_effort(env)를 그대로
+      // 쓰면 추론 토큰이 작은 한도를 모두 소진해 본문이 빈 채로 잘려 나온다(검증: low+64
+      // → "" finish=length). 게이트는 항상 minimal 로 고정해 신뢰성을 답변 설정과 분리한다.
       max_completion_tokens: maxTokens,
-      reasoning_effort: env.OPENAI_REASONING_EFFORT,
+      reasoning_effort: "minimal",
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
