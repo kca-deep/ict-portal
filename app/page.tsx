@@ -1,6 +1,6 @@
 "use client";
 
-import { SquarePen, Copy, Check, ArrowUp, Square } from "lucide-react";
+import { SquarePen, Copy, Check, ArrowUp, Square, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Response } from "@/components/ui/response";
 import {
@@ -104,10 +104,12 @@ export default function Home() {
     if (!el) return;
     const LINE = 24; // text-[15px] leading-6 (1.5rem)
     const PAD = 32; // py-4 위아래 16px
-    const minRows = messages.length === 0 ? 5 : 2;
+    const firstScreen = messages.length === 0;
+    const minRows = firstScreen ? 5 : 2;
     el.style.height = "auto";
-    const min = minRows * LINE + PAD;
-    const max = messages.length === 0 ? 8 * LINE + PAD : 6 * LINE + PAD;
+    // 첫 화면 입력창은 기본 세로 높이를 1/4 줄인다(세로가 너무 길다는 피드백).
+    const min = Math.round((minRows * LINE + PAD) * (firstScreen ? 0.75 : 1));
+    const max = firstScreen ? 8 * LINE + PAD : 6 * LINE + PAD;
     const next = Math.min(Math.max(el.scrollHeight, min), max);
     el.style.height = `${next}px`;
     el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
@@ -407,8 +409,9 @@ export default function Home() {
         </header>
 
         {messages.length === 0 ? (
-          /* 첫 화면: 인사말 + 입력창을 화면 정중앙에 배치 (ChatGPT·Claude·Gemini 방식) */
-          <div className="flex-1 flex flex-col items-center justify-center px-4">
+          /* 첫 화면: 인사말 + 입력창을 화면 정중앙에 배치 (ChatGPT·Claude·Gemini 방식).
+             pb 로 헤더 높이(약 60px)만큼 보정 → 헤더 포함 전체 뷰포트 기준 정중앙. */
+          <div className="flex-1 flex flex-col items-center justify-center px-4 pb-[60px]">
             <div className="w-full max-w-3xl flex flex-col items-center text-center">
               <p
                 className="mb-7 text-3xl font-medium tracking-tight text-foreground"
@@ -416,7 +419,7 @@ export default function Home() {
               >
                 무엇을 도와드릴까요?
               </p>
-              <div className="w-full">{composer}</div>
+              <div className="w-full max-w-[700px]">{composer}</div>
             </div>
           </div>
         ) : (
@@ -448,14 +451,28 @@ export default function Home() {
                       </span>
                     )}
                     {m.content && !(loading && i === messages.length - 1) && (
-                      <div className="mt-2 flex items-center gap-2">
-                        {m.responseMs != null && (
-                          <span className="text-[11px] text-muted-foreground tabular-nums">
-                            응답 {(m.responseMs / 1000).toFixed(1)}초
+                      <>
+                        {/* 모든 답변 끝에 고정 표시되는 면책 안내(LLM 출력과 무관). */}
+                        <div className="mt-3 pt-3 border-t border-accent-foreground/15 flex gap-2 text-[13px] italic leading-relaxed text-muted-foreground">
+                          <TriangleAlert
+                            className="w-4 h-4 shrink-0 mt-0.5 text-amber-500"
+                            aria-hidden
+                          />
+                          <span>
+                            본 답변은 참고용 안내이며 확정적 법률 자문이 아닙니다.
+                            최종 판단은 법제처 원문 및 소관 부서 확인을 거치시기
+                            바랍니다.
                           </span>
-                        )}
-                        <CopyButton text={m.content} />
-                      </div>
+                        </div>
+                        <div className="mt-2 flex items-center gap-2">
+                          {m.responseMs != null && (
+                            <span className="text-[11px] text-muted-foreground tabular-nums">
+                              응답 {(m.responseMs / 1000).toFixed(1)}초
+                            </span>
+                          )}
+                          <CopyButton text={m.content} />
+                        </div>
+                      </>
                     )}
                   </div>
                   {m.sources && m.sources.length > 0 && (
