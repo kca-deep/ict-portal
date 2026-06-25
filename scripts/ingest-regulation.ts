@@ -64,8 +64,9 @@ function chunkByArticle(body: string): { content: string; article?: string }[] {
   }
 
   if (headers.length === 0) {
-    // 조 헤더가 없는 문서 (별지/별표/표기방안 등) — 통째로 또는 큰 단위로
-    return splitByParagraph(body).map((c) => ({ content: c }));
+    // 조 헤더가 없는 문서 (별지/별표/표기방안 등) — 표는 '행' 단위로 분할(헤더행 prepend),
+    // 표가 아닌 산문은 단락 단위로. 큰 표가 한 청크로 뭉쳐 임베딩이 희석되는 문제 방지.
+    return splitMarkdownTables(body).map((c) => ({ content: c }));
   }
 
   // 첫 조 이전 prose (제1장 총칙 같은 챕터 헤더, 시행일 메타 등) 도 1개 청크로
@@ -116,6 +117,42 @@ function splitByParagraphMarker(block: string): string[] {
 
   if (parts.length === 0) return [block];
   return parts.map((p) => `${headerLine}\n${p}`);
+}
+
+/**
+ * 마크다운 파이프 표를 '행' 단위로 분할. 각 데이터행에 헤더행+구분선을 prepend 해
+ * 열(컬럼) 맥락을 유지한다. 표가 아닌 구간은 splitByParagraph 로 처리.
+ * 큰 표(예: [별표 1] 비·세목별 산정기준)가 한 청크로 뭉쳐 임베딩이 희석되는 문제를 막는다.
+ */
+function splitMarkdownTables(body: string): string[] {
+  const lines = body.split("\n");
+  const isRow = (l: string) => /^\s*\|.*\|\s*$/.test(l);
+  const isSep = (l: string) => /^\s*\|[\s:|-]+\|\s*$/.test(l);
+  const out: string[] = [];
+  let buf: string[] = [];
+  const flush = () => {
+    const s = buf.join("\n").trim();
+    if (s) out.push(...splitByParagraph(s));
+    buf = [];
+  };
+  for (let i = 0; i < lines.length; ) {
+    // 표 시작 = 데이터 행 + 바로 다음 줄이 구분선(|---|)
+    if (isRow(lines[i]) && i + 1 < lines.length && isSep(lines[i + 1])) {
+      flush();
+      const header = lines[i];
+      const sep = lines[i + 1];
+      i += 2;
+      while (i < lines.length && isRow(lines[i])) {
+        if (!isSep(lines[i])) out.push(`${header}\n${sep}\n${lines[i].trim()}`);
+        i++;
+      }
+    } else {
+      buf.push(lines[i]);
+      i++;
+    }
+  }
+  flush();
+  return out;
 }
 
 /** fallback: 빈 줄 기준 단락 분할 + 크기 합치기. */
