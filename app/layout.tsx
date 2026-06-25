@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
-import { Instrument_Serif } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import "streamdown/styles.css";
 
-// 헤더 워드마크용 디스플레이 폰트(이탤릭). 본문과 분리해 --font-display 로만 사용.
-const display = Instrument_Serif({
-  weight: "400",
-  style: ["normal", "italic"],
-  subsets: ["latin"],
+// 헤더 워드마크·인사말용 디스플레이 폰트: KoPub World 돋움(자체 호스팅). --font-display 로만 사용.
+const display = localFont({
+  src: [
+    { path: "./fonts/KoPubDotum-Medium.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/KoPubDotum-Bold.woff2", weight: "700", style: "normal" },
+  ],
   variable: "--font-display",
   display: "swap",
 });

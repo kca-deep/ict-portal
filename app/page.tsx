@@ -102,12 +102,12 @@ export default function Home() {
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    const LINE = 20; // text-sm leading-5 (1.25rem)
-    const PAD = 24; // py-3 위아래 12px
-    const minRows = messages.length === 0 ? 3 : 1;
+    const LINE = 24; // text-[15px] leading-6 (1.5rem)
+    const PAD = 32; // py-4 위아래 16px
+    const minRows = messages.length === 0 ? 5 : 2;
     el.style.height = "auto";
     const min = minRows * LINE + PAD;
-    const max = 5 * LINE + PAD;
+    const max = messages.length === 0 ? 8 * LINE + PAD : 6 * LINE + PAD;
     const next = Math.min(Math.max(el.scrollHeight, min), max);
     el.style.height = `${next}px`;
     el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
@@ -291,8 +291,7 @@ export default function Home() {
   }
 
   // 버튼 세로 위치: 첫 화면(3행 박스)은 세로 중앙, 대화 중(1행 시작)은 하단 고정.
-  const composerBtnPos =
-    messages.length === 0 ? "top-1/2 -translate-y-1/2" : "bottom-1";
+  const composerBtnPos = "bottom-2.5";
 
   // 중앙(첫 화면)·하단(대화 중) 어디서든 동일하게 쓰는 입력창. 높이는 위 effect가 제어.
   const composer = (
@@ -303,8 +302,8 @@ export default function Home() {
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={onKeyDown}
         placeholder="메시지를 입력하세요…"
-        rows={messages.length === 0 ? 3 : 1}
-        className="w-full resize-none rounded-2xl pl-4 pr-14 py-3 text-sm leading-5 bg-card text-card-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring shadow-lg"
+        rows={messages.length === 0 ? 3 : 2}
+        className="w-full resize-none rounded-3xl border border-[#dceefc] pl-5 pr-14 py-4 text-[15px] leading-6 bg-[#f3f9ff] text-card-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring shadow-sm transition-shadow focus:shadow-md"
         disabled={loading}
       />
       {loading ? (
@@ -339,39 +338,59 @@ export default function Home() {
           }`}
         >
         {/* Header */}
-        <header className="flex items-center justify-between px-6 py-4 shrink-0 border-b border-border bg-background/80 backdrop-blur-sm">
+        <header className="flex items-center justify-between px-6 py-2 shrink-0 border-b border-border bg-background/80 backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <svg
-              viewBox="0 0 256 256"
+              viewBox="0 0 400 400"
               role="img"
               aria-label="PIMS 어드바이저 로고"
-              className="w-10 h-10 shrink-0"
+              className="w-11 h-11 shrink-0"
             >
-              <rect width="128" height="128" fill="#27349C" />
-              <rect x="128" width="128" height="128" fill="#2E6FE0" />
-              <rect y="128" width="128" height="128" fill="#1C8FC9" />
-              <rect x="128" y="128" width="128" height="128" fill="#159B8E" />
-              <g
-                fill="#ffffff"
-                fontFamily="'Helvetica Neue', Arial, sans-serif"
-                fontWeight="700"
-                fontSize="80"
-                textAnchor="middle"
-              >
-                <text x="64" y="92">P</text>
-                <text x="192" y="92">I</text>
-                <text x="64" y="220">M</text>
-                <text x="192" y="220">S</text>
+              <defs>
+                <linearGradient
+                  id="pimsBlueP"
+                  x1="60"
+                  y1="60"
+                  x2="240"
+                  y2="330"
+                  gradientUnits="userSpaceOnUse"
+                >
+                  <stop offset="0" stopColor="#1e72c6" />
+                  <stop offset="1" stopColor="#0e4c92" />
+                </linearGradient>
+                <linearGradient
+                  id="pimsSky"
+                  x1="190"
+                  y1="80"
+                  x2="320"
+                  y2="330"
+                  gradientUnits="userSpaceOnUse"
+                >
+                  <stop offset="0" stopColor="#6fb7f0" />
+                  <stop offset="1" stopColor="#3d93de" />
+                </linearGradient>
+                <mask id="pimsCut">
+                  <rect x="60" y="60" width="280" height="280" rx="46" fill="#fff" />
+                  <circle cx="430" cy="430" r="200" fill="#000" />
+                </mask>
+              </defs>
+              <g mask="url(#pimsCut)">
+                <rect x="60" y="60" width="280" height="280" fill="url(#pimsSky)" />
+                <path
+                  d="M200 60 A70 70 0 0 1 200 200 A70 70 0 0 0 200 340 L60 340 L60 60 Z"
+                  fill="url(#pimsBlueP)"
+                />
               </g>
+              <circle cx="168" cy="125" r="23" fill="#fff" />
             </svg>
-            <div>
+            <div className="flex flex-col justify-center h-11">
               <h1
-                className="text-2xl italic leading-none tracking-tight text-foreground"
+                className="text-lg font-bold leading-tight tracking-tight text-foreground"
                 style={{ fontFamily: "var(--font-display)" }}
               >
                 AI Advisor
               </h1>
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <p className="text-xs text-muted-foreground leading-tight">
                 ICT기금 규정·지침·법령 안내
               </p>
             </div>
@@ -390,9 +409,9 @@ export default function Home() {
         {messages.length === 0 ? (
           /* 첫 화면: 인사말 + 입력창을 화면 정중앙에 배치 (ChatGPT·Claude·Gemini 방식) */
           <div className="flex-1 flex flex-col items-center justify-center px-4">
-            <div className="w-full max-w-2xl flex flex-col items-center text-center">
+            <div className="w-full max-w-3xl flex flex-col items-center text-center">
               <p
-                className="mb-6 text-3xl italic tracking-tight text-foreground"
+                className="mb-7 text-3xl font-medium tracking-tight text-foreground"
                 style={{ fontFamily: "var(--font-display)" }}
               >
                 무엇을 도와드릴까요?

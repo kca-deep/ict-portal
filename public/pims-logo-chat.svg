@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400" role="img" aria-label="PIMS 묻고 답하다">
+  <defs>
+    <linearGradient id="chatBlue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5cbcff"/>
+      <stop offset="1" stop-color="#2a7df0"/>
+    </linearGradient>
+    <linearGradient id="chatAmber" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffce5c"/>
+      <stop offset="1" stop-color="#f39b1e"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <path d="M118 250 L96 300 Q92 310 103 306 L150 286 Z" fill="url(#chatBlue)"/>
+    <rect x="64" y="86" width="184" height="156" rx="50" fill="url(#chatBlue)"/>
+  </g>
+  <g style="mix-blend-mode:multiply">
+    <path d="M286 318 L312 296 Q320 290 314 300 L300 330 Z" fill="url(#chatAmber)"/>
+    <rect x="178" y="158" width="160" height="136" rx="44" fill="url(#chatAmber)"/>
+  </g>
+</svg>
