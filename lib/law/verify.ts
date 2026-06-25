@@ -33,50 +33,69 @@ export type CitationCheck = {
   hasHallucination: boolean; // not_found 가 하나라도 있으면 true
 };
 
-// (법령명 | 같은 법 | 동법) + 제N조(의M). 항·호는 조 단위 검증이라 캡처만 하고 버린다.
+// (법령명 | 같은 법[ 시행령/시행규칙] | 동법[ 시행령/시행규칙]) + 제N조(의M).
+// 항·호는 조 단위 검증이라 캡처만 하고 버린다.
 // 법령명은 공백 포함 다어절을 허용("개인정보 보호법", "정보통신망 이용촉진 및 …")하되
 // 쉼표·마침표·따옴표는 문자클래스에서 제외해 문장 경계를 넘지 않는다. 앞 단어가 섞이는
 // 과포착은 resolveLaw 의 앞토큰 제거 재시도로 흡수한다.
 // 법령명 뒤에 닫는 낫표(」』】)·따옴표가 올 수 있다("「근로기준법」 제56조") — 조 앞에서 허용.
+// 대용어는 "같은 법 시행령 제N조"처럼 시행령·시행규칙 접미사를 허용한다. 이 접미사가
+// 일반 법령명 분기로 새서 "시행령" 한 단어로 축약되면 엉뚱한 시행령에 매칭되므로,
+// 대용어 분기를 일반 분기보다 먼저 두어 직전 본법의 시행령으로 바인딩되게 한다.
 const CITATION_RE =
-  /(?<law>같은\s*법|동법|(?:[가-힣A-Za-z0-9·()]+\s+)*[가-힣A-Za-z0-9·()]*(?:법률|법|령|규칙|규정|조례))\s*[」』】"']?\s*제(?<no>\d+)조(?:의(?<branch>\d+))?/g;
+  /(?<law>같은\s*법(?:\s*시행(?:령|규칙))?|동법(?:\s*시행(?:령|규칙))?|(?:[가-힣A-Za-z0-9·()]+\s+)*[가-힣A-Za-z0-9·()]*(?:법률|법|령|규칙|규정|조례))\s*[」』】"']?\s*제(?<no>\d+)조(?:의(?<branch>\d+))?/g;
 
 type ParsedCitation = { raw: string; lawName: string; article: string };
 
-// 답변 텍스트에서 인용을 추출. "같은 법/동법"은 직전 명시 법령에 바인딩한다.
+// 답변 텍스트에서 인용을 추출. "같은 법/동법[ 시행령/시행규칙]"은 직전 명시 법령에 바인딩한다.
 function parseCitations(text: string): ParsedCitation[] {
   const out: ParsedCitation[] = [];
   const seen = new Set<string>();
-  let currentLaw = "";
+  let currentLaw = ""; // 직전 명시 본법(또는 명시 법령) 전체명
 
   for (const m of text.matchAll(CITATION_RE)) {
     const g = m.groups as { law: string; no: string; branch?: string };
     const lawToken = g.law.trim().replace(/\s+/g, " ");
-    // "같은 법/동법"이 앞 단어와 함께 과포착돼도(예: "위반한 사용자는 같은 법") 대명사로
-    // 인식해 직전 법령에 바인딩한다. 일반 법령명이 "동법"으로 끝나는 오인(예: "노동법")은
-    // 앞에 공백/문두 경계를 요구해 배제한다.
-    const isAnaphora =
-      /(^|\s)같은\s*법$/.test(lawToken) || /(^|\s)동법$/.test(lawToken);
+    // "같은 법/동법"(+ 선택적 시행령·시행규칙)을 대명사로 인식한다. 앞 단어가 함께
+    // 과포착돼도(예: "위반한 사용자는 같은 법") 대명사로 본다. 일반 법령명이 "동법"으로
+    // 끝나는 오인(예: "노동법")은 앞에 공백/문두 경계를 요구해 배제한다.
+    const ana = lawToken.match(/(?:^|\s)(같은\s*법|동법)(?:\s*(시행령|시행규칙))?$/);
 
-    if (!isAnaphora) currentLaw = expandLawAbbreviation(lawToken);
-    if (!currentLaw) continue; // 직전 명시 법령 없이 "같은 법"만 나온 경우 스킵
+    let lawName: string;
+    let displayLaw: string;
+    if (ana) {
+      if (!currentLaw) continue; // 직전 명시 법령 없이 대용어만 나온 경우 스킵
+      const suffix = ana[2]; // "시행령" | "시행규칙" | undefined
+      // "같은 법 시행령" = 직전 본법의 시행령. currentLaw 가 이미 시행령/시행규칙이면
+      // 그 접미사를 떼고 다시 붙여 "… 시행령 시행령" 중복을 피한다.
+      const baseAct = currentLaw.replace(/\s*시행(령|규칙)\s*$/, "");
+      lawName = suffix ? `${baseAct} ${suffix}` : currentLaw;
+      displayLaw = suffix ? `${ana[1]} ${suffix}` : ana[1];
+    } else {
+      currentLaw = expandLawAbbreviation(lawToken);
+      if (!currentLaw) continue;
+      lawName = currentLaw;
+      displayLaw = lawToken;
+    }
 
     const article = g.branch ? `제${g.no}조의${g.branch}` : `제${g.no}조`;
-    const key = `${currentLaw}|${article}`;
+    const key = `${lawName}|${article}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    // 표기는 과포착된 앞 단어를 떼고: 대명사는 "같은 법/동법"부터, 아니면 법령 토큰.
-    const displayLaw = isAnaphora
-      ? lawToken.match(/(같은\s*법|동법)$/)?.[0] ?? lawToken
-      : lawToken;
     const raw = `${displayLaw} ${article}`
       .replace(/[「」『』【】]/g, "")
       .replace(/\s+/g, " ")
       .trim();
-    out.push({ raw, lawName: currentLaw, article });
+    out.push({ raw, lawName, article });
   }
   return out;
 }
+
+// 한 단어로 축약되면 아무 법령이나 1순위로 매칭되는 일반어. 후보가 이로 축약되면
+// 매칭을 거부해 엉뚱한 법령(예: "시행령" → 무관한 시행령) 주입을 막는다.
+const GENERIC_LAW_TOKENS = new Set([
+  "법", "법률", "령", "시행령", "시행규칙", "규칙", "규정", "조례", "같은", "동법",
+]);
 
 // 법령명 → 대표 LawRef. 과포착(앞 단어 혼입) 대비 전체 → 앞 토큰 제거 순으로 재시도.
 // 각 시도에서 정확매칭(공백 무시) 우선, 없으면 1위 부분매칭.
@@ -87,7 +106,9 @@ async function resolveLaw(
   const tokens = lawName.split(/\s+/).filter(Boolean);
   const noSpace = (s: string) => s.replace(/\s+/g, "");
   for (let start = 0; start < Math.max(tokens.length, 1); start++) {
-    const candidate = tokens.slice(start).join(" ") || lawName;
+    const candidate = (tokens.slice(start).join(" ") || lawName).trim();
+    // 일반어 한 개로 축약된 후보는 변별력이 없어 거부(다음 시도도 더 짧아질 뿐이라 종료).
+    if (GENERIC_LAW_TOKENS.has(candidate)) break;
     const refs = await searchByName(oc, candidate, 5);
     if (refs.length > 0) {
       const exact = refs.find((r) => noSpace(r.name) === noSpace(candidate));
