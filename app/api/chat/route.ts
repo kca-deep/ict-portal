@@ -262,7 +262,9 @@ export async function POST(req: NextRequest) {
         // 5) 답변을 먼저 스트리밍한다. (인용 검증용으로 본문을 누적)
         //    범위 밖이면 어떤 근거도 주지 않아, 시스템 프롬프트의 범위 밖 거절만 나오게 한다.
         let answerText = "";
-        const answerDocs = outOfScope ? [] : retrievedDocs;
+        // law 분기에선 규정 청크를 주입하지 않는다(진짜 이분법). 규정 본문이 답변에
+        // 섞이면서 출처는 법령만 표시되던 "표시≠사용" 불일치를 제거.
+        const answerDocs = outOfScope || routedToLaw ? [] : retrievedDocs;
         const answerLawContext = outOfScope ? undefined : lawContext;
         for await (const chunk of ragChatStream(body.messages, answerDocs, answerLawContext)) {
           answerText += chunk;
