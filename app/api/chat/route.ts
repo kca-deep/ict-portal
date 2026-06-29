@@ -240,11 +240,26 @@ export async function POST(req: NextRequest) {
             const texts = await Promise.all(
               precRefs.map((r) => getDecisionText(r.serial, r.domain)),
             );
-            precedentSources = precRefs.map((r, i) =>
-              toPrecedentSource(r, texts[i], i),
+            // 판례 scope creep 방지: 판시·판결요지를 질의로 재정렬해 관련도 낮은 판례 제외.
+            // 무관 판례(예: "전담기관"에 공직선거법위반)가 참조문서로 새는 것을 차단.
+            const judged = await rerank(
+              query,
+              precRefs.map((r, i) => ({
+                id: i,
+                text: `${r.caseName}\n${texts[i]?.summary ?? ""}\n${texts[i]?.holding ?? ""}`,
+              })),
+              precRefs.length,
+            ).catch(() => precRefs.map((_, i) => ({ id: i, score: 1 }))); // 재정렬 실패 시 보존
+            const keep = new Set(
+              judged.filter((j) => j.score >= env.RELEVANCE_THRESHOLD).map((j) => j.id as number),
             );
-            const precBlock = buildPrecedentContext(precRefs, texts);
-            lawContext = [lawContext, precBlock].filter(Boolean).join("\n\n");
+            const keptRefs = precRefs.filter((_, i) => keep.has(i));
+            const keptTexts = texts.filter((_, i) => keep.has(i));
+            precedentSources = keptRefs.map((r, i) => toPrecedentSource(r, keptTexts[i], i));
+            if (keptRefs.length > 0) {
+              const precBlock = buildPrecedentContext(keptRefs, keptTexts);
+              lawContext = [lawContext, precBlock].filter(Boolean).join("\n\n");
+            }
           }
         }
         const lawRefs = lawSources.map((s) => ({
