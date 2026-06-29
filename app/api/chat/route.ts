@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import {
   ragChatStream,
-  isRegulationSufficient,
   isInScope,
   type ChatMessage,
   type RetrievedDoc,
@@ -208,12 +207,10 @@ export async function POST(req: NextRequest) {
         // 참조문서를 모두 생략하고 정중한 거절만 스트리밍한다.
         const outOfScope = belowThreshold ? !(await isInScope(query)) : false;
 
-        let gateSufficient: boolean | null = null;
-        if (!belowThreshold) {
-          gateSufficient = await isRegulationSufficient(query, retrievedDocs);
-        }
-        const routedToLaw =
-          !outOfScope && (belowThreshold || gateSufficient === false);
+        // 규정 관련도가 기준치 미만일 때만 법령으로 분기한다. 구 sufficiency 게이트
+        // (isRegulationSufficient)는 top-K 재정렬 청크에 민감해 같은 질의가 토큰 하나로
+        // 규정↔법령을 오가게 만들었다 — 제거하고 안정적 점수 신호만 사용.
+        const routedToLaw = !outOfScope && belowThreshold;
 
         let lawContext: string | undefined;
         let lawSources: SourceChunk[] = [];
@@ -257,7 +254,7 @@ export async function POST(req: NextRequest) {
 
         console.log(
           `[chat] route=${outOfScope ? "out_of_scope" : routedToLaw ? "law" : "regulation"} maxScore=${maxScore.toFixed(3)} ` +
-            `threshold=${env.RELEVANCE_THRESHOLD} belowThreshold=${belowThreshold} gateSufficient=${gateSufficient} ` +
+            `threshold=${env.RELEVANCE_THRESHOLD} belowThreshold=${belowThreshold} ` +
             `hits=${hits.length}` +
             (routedToLaw ? ` laws=[${lawRefs.map((r) => r.name).join(", ")}]` : " (법제처 미호출)"),
         );
