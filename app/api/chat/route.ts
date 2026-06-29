@@ -195,10 +195,9 @@ export async function POST(req: NextRequest) {
           metadata: s.metadata,
         }));
 
-        // 4) 관련도 분기 — 다음 두 조건 중 하나면 법제처 법령으로 보강:
-        //    (a) 최상위 관련도 < 기준치(RELEVANCE_THRESHOLD)
-        //    (b) 기준치 이상이지만 적합성 게이트가 "내부 규정만으로 답변 불가"로 판정
-        //    (b)는 점수는 높지만 실제로는 규정에 답이 없는 회색지대를 잡는다.
+        // 4) 관련도 분기 — 내부 규정 최상위 관련도가 RELEVANCE_THRESHOLD 미만이면
+        //    법제처 법령·판례로 보강한다. 구 sufficiency 게이트((b) 조건: LLM이
+        //    "내부 규정만으로 불충분"을 판정)는 재정렬 청크 변동에 민감해 제거됐다.
         const maxScore = sources.length > 0 ? sources[0].score : 0;
         const belowThreshold = maxScore < env.RELEVANCE_THRESHOLD;
 

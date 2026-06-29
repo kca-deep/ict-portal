@@ -451,7 +451,7 @@ export async function searchAiLaw(
           name: h.name,
           lawId: h.lawId,
           promulgated: h.promulgated,
-          score: Number(score.toFixed(3)), // 그 법령의 최상위(=대표) 관련도
+          score: Number(Math.min(1, Math.max(0, score)).toFixed(3)), // 그 법령의 최상위(=대표) 관련도 (표시는 0~1 상한)
         },
         arts: [],
       };
