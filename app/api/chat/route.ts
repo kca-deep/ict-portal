@@ -299,6 +299,11 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // 인용 조문의 표시 관련도는 검색(lawSources)에서 끌어온다. 검색에 없던(모델이
+        // 기억으로 인용한) 조문은 0 — "검증된 실존"과 "검색 근거"를 구분(과표기 방지, M11).
+        const lawScoreById = new Map(
+          lawSources.map((s) => [String((s.metadata as { lawId?: string }).lawId ?? ""), s.score]),
+        );
         // 답변이 인용했고 법제처에 실존이 확인된 조문을, 그 본문과 함께 참조 카드로.
         const citationSources: SourceChunk[] = (citationCheck?.verdicts ?? [])
           .filter((v) => v.status === "verified" && v.body)
@@ -308,7 +313,7 @@ export async function POST(req: NextRequest) {
             source_ref: `법제처 국가법령정보 · 법령ID ${v.lawId ?? ""}`,
             content: formatArticle(v.article, v.articleTitle ?? "", v.body!),
             metadata: { kind: "law", lawId: v.lawId, article: v.article, cited: true },
-            score: 1,
+            score: lawScoreById.get(String(v.lawId ?? "")) ?? 0,
           }));
 
         // 7) 라우팅·참조문서 전송. 법령 분기면 인용 조문(있으면)을, 없으면 검색 조문을,
