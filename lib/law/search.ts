@@ -41,6 +41,18 @@ export type LawLookup = {
 const LAW_NAME_RE =
   /[가-힣A-Za-z0-9·()]+(?:법률|시행령|시행규칙|법|규정|규칙|조례)/g;
 
+// 출처: chrisryugj/korean-law-mcp (MIT) src/lib/law-search.ts NON_LAW_NAME_RE 이식 + 대화체 필러 추가.
+// 법령'명'이 아닌 행위·절차·결과어와 대화 필러를 제거해 aiSearch/재정렬 query를 정제한다.
+// 개념 토큰(기업회생·육아휴직 등)은 보존한다.
+const NON_LAW_NAME_RE =
+  /\s*(과태료|절차|비용|처벌|기준|허가|신청|부과|근거|위반|방법|요건|조건|처분|수수료|신고|등록|면허|인가|승인|취소|정지|벌칙|벌금|과징금|이행강제금|시정명령|체계|구조|판례|해석|개정|별표|서식|반환|납부|감면|면제|제한|금지|의무|권리|자격|종류|기간|대상|범위|적용|감경|영향|분석|위임|현황|처리|민원|매뉴얼|업무|담당|내용|알려|알려줘|진행|관련|어떻게|무엇|뭐|싶|해야|하는)\s*/g;
+
+// 자연어 질의를 법령 검색어로 정제. 과잉 제거 시 원문으로 폴백.
+export function distillLawQuery(query: string): string {
+  const stripped = query.replace(NON_LAW_NAME_RE, " ").replace(/\s+/g, " ").trim();
+  return stripped.length >= 2 ? stripped : query;
+}
+
 // 질의에서 법령명 후보를 추출 ("근로기준법 연차" → ["근로기준법"]).
 function extractLawNames(query: string): string[] {
   const found = query.match(LAW_NAME_RE) ?? [];
@@ -394,16 +406,19 @@ export async function searchAiLaw(
   const oc = env.LAW_GO_KR_API_KEY;
   if (!oc || !query.trim()) return { refs: [], context: "", articles: [] };
 
+  // 자연어 원문을 법령 검색어로 정제(필러 제거) 후 약칭→정식명 확장.
+  const distilled = expandLawAbbreviation(distillLawQuery(query));
+
   const json = await cachedGetJson(
-    buildSearchUrl({ oc, target: "aiSearch", query, display, search: 0 }),
+    buildSearchUrl({ oc, target: "aiSearch", query: distilled, display, search: 0 }),
     "search_ai_law",
     TTL_SEARCH,
   );
   const hits = parseAiSearchList(json);
   if (hits.length === 0) return { refs: [], context: "", articles: [] };
 
-  // 질의 기준 재정렬(내림차순) 후 법령ID 단위로 묶어, 각 법령의 상위 조문을 모은다.
-  const ordered = await rerankAiHits(query, hits);
+  // 질의 기준 재정렬(내림차순)도 정제 query로 — 필러가 곁가지 조문을 띄우는 것 방지.
+  const ordered = await rerankAiHits(distilled, hits);
   if (ordered.length === 0 || ordered[0].score < minScore) {
     // 최상위조차 무관 → 엉뚱한 법령 노출 방지차 빈 결과.
     return { refs: [], context: "", articles: [] };
