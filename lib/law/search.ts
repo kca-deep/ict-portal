@@ -401,7 +401,7 @@ export async function searchAiLaw(
   display = 50,
   maxLaws = 3,
   articlesPerLaw = 3,
-  minScore = 0.02,
+  minScore = 0.05,
 ): Promise<LawLookup> {
   const oc = env.LAW_GO_KR_API_KEY;
   if (!oc || !query.trim()) return { refs: [], context: "", articles: [] };
@@ -419,14 +419,30 @@ export async function searchAiLaw(
 
   // 질의 기준 재정렬(내림차순)도 정제 query로 — 필러가 곁가지 조문을 띄우는 것 방지.
   const ordered = await rerankAiHits(distilled, hits);
-  if (ordered.length === 0 || ordered[0].score < minScore) {
+
+  // 출처 취지: chrisryugj/korean-law-mcp (MIT) scoreLawRelevance.
+  // Cohere 의미점수에 결정론 신호를 결합한다 — 법령'명'이 정제 키워드를 포함하면 가점
+  // (개념-법령 정합), 시행령/시행규칙은 본법 우선 위해 약한 감점(형제 타이브레이커).
+  const kw = distilled.split(/\s+/).filter((w) => w.length >= 2);
+  const adjusted = ordered
+    .map(({ hit, score }) => {
+      let s = score;
+      if (kw.some((w) => hit.name.includes(w) || w.includes(hit.name.replace(/(법률|법|시행령|시행규칙)$/, "")))) {
+        s += 0.15;
+      }
+      if (/시행령|시행규칙/.test(hit.name)) s -= 0.05;
+      return { hit, score: s };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  if (adjusted.length === 0 || adjusted[0].score < minScore) {
     // 최상위조차 무관 → 엉뚱한 법령 노출 방지차 빈 결과.
     return { refs: [], context: "", articles: [] };
   }
 
   type Group = { ref: LawRef; arts: string[] };
   const groups = new Map<string, Group>();
-  for (const { hit: h, score } of ordered) {
+  for (const { hit: h, score } of adjusted) {
     let g = groups.get(h.lawId);
     if (!g) {
       if (groups.size >= maxLaws) continue; // 이미 충분한 법령 수집됨
