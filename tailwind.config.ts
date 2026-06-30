@@ -46,6 +46,10 @@ const config: Config = {
         },
         "badge-regulation": "var(--badge-regulation)",
         "badge-law": "var(--badge-law)",
+        composer: {
+          DEFAULT: "var(--composer)",
+          border: "var(--composer-border)",
+        },
         border: "var(--border)",
         input: "var(--input)",
         ring: "var(--ring)",

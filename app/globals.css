@@ -25,6 +25,9 @@
   --border: oklch(0.9276 0.0058 264.5313);
   --input: oklch(0.9276 0.0058 264.5313);
   --ring: oklch(0.7686 0.1647 264.5419);
+  /* 입력창(composer) — 연한 파랑 톤 배경·테두리 (page.tsx 하드코딩 대체) */
+  --composer: #f3f9ff;
+  --composer-border: #dceefc;
   --chart-1: oklch(0.7686 0.1647 264.5419);
   --chart-2: oklch(0.6658 0.1574 264.5419);
   --chart-3: oklch(0.5553 0.1455 264.5419);
@@ -81,6 +84,9 @@
   --border: oklch(0.3715 0 0);
   --input: oklch(0.3715 0 0);
   --ring: oklch(0.7686 0.1647 264.5419);
+  /* 입력창(composer) — 다크모드 변형(카드보다 약간 높은 면, 회색 테두리). */
+  --composer: oklch(0.2393 0 0);
+  --composer-border: oklch(0.3715 0 0);
   --chart-1: oklch(0.8369 0.1644 264.5419);
   --chart-2: oklch(0.6658 0.1574 264.5419);
   --chart-3: oklch(0.4732 0.1247 264.5419);

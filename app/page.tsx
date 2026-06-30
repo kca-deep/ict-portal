@@ -292,8 +292,8 @@ export default function Home() {
     setActiveSource(null);
   }
 
-  // 버튼 세로 위치: 첫 화면(3행 박스)은 세로 중앙, 대화 중(1행 시작)은 하단 고정.
-  const composerBtnPos = "bottom-2.5";
+  // 버튼 위치: 입력창 우하단. 둥근 모서리 때문에 하단 여백을 우측보다 약간 더 줌.
+  const composerBtnPos = "right-3 bottom-4";
 
   // 중앙(첫 화면)·하단(대화 중) 어디서든 동일하게 쓰는 입력창. 높이는 위 effect가 제어.
   const composer = (
@@ -305,7 +305,7 @@ export default function Home() {
         onKeyDown={onKeyDown}
         placeholder="메시지를 입력하세요…"
         rows={messages.length === 0 ? 3 : 2}
-        className="w-full resize-none rounded-3xl border border-[#dceefc] pl-5 pr-14 py-4 text-[15px] leading-6 bg-[#f3f9ff] text-card-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring shadow-sm transition-shadow focus:shadow-md"
+        className="w-full resize-none rounded-xl border border-composer-border pl-5 pr-14 py-4 text-[15px] leading-6 bg-composer text-card-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring shadow-sm transition-shadow focus:shadow-md"
         disabled={loading}
       />
       {loading ? (
@@ -313,7 +313,7 @@ export default function Home() {
           onClick={stop}
           aria-label="멈춤"
           title="멈춤"
-          className={`absolute right-2 ${composerBtnPos} inline-flex items-center justify-center w-9 h-9 rounded-full bg-destructive text-destructive-foreground shadow-md transition-opacity hover:opacity-90`}
+          className={`absolute ${composerBtnPos} inline-flex items-center justify-center h-9 w-9 rounded-xl bg-destructive text-destructive-foreground shadow-md transition-opacity hover:opacity-90`}
         >
           <Square className="w-4 h-4 fill-current" aria-hidden />
         </button>
@@ -323,7 +323,7 @@ export default function Home() {
           disabled={!input.trim()}
           aria-label="전송"
           title="전송"
-          className={`absolute right-2 ${composerBtnPos} inline-flex items-center justify-center w-9 h-9 rounded-full bg-primary text-primary-foreground shadow-md transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed`}
+          className={`absolute ${composerBtnPos} inline-flex items-center justify-center h-9 w-9 rounded-xl bg-primary text-primary-foreground shadow-md transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed`}
         >
           <ArrowUp className="w-5 h-5" aria-hidden />
         </button>
@@ -334,13 +334,13 @@ export default function Home() {
   return (
     <main className="flex h-screen bg-background">
       <div className="flex-1 flex flex-col h-full min-w-0">
-        <div
-          className={`flex flex-col w-full h-full ${
-            activeSource ? "" : "max-w-3xl mx-auto"
-          }`}
-        >
-        {/* Header */}
-        <header className="flex items-center justify-between px-6 py-2 shrink-0 border-b border-border bg-background/80 backdrop-blur-sm">
+        {/* Header — 하단 구분선을 전체 가로 폭으로 표시, 내용만 채팅 컬럼에 정렬 */}
+        <header className="shrink-0 border-b border-border bg-background/80 backdrop-blur-sm">
+          <div
+            className={`flex items-center justify-between px-6 py-2 ${
+              activeSource ? "" : "max-w-3xl mx-auto"
+            }`}
+          >
           <div className="flex items-center gap-3">
             <svg
               viewBox="0 0 400 400"
@@ -406,8 +406,14 @@ export default function Home() {
           >
             <SquarePen className="w-5 h-5" aria-hidden="true" />
           </button>
+          </div>
         </header>
 
+        <div
+          className={`flex flex-col w-full flex-1 min-h-0 ${
+            activeSource ? "" : "max-w-3xl mx-auto"
+          }`}
+        >
         {messages.length === 0 ? (
           /* 첫 화면: 인사말 + 입력창을 화면 정중앙에 배치 (ChatGPT·Claude·Gemini 방식).
              pb 로 헤더 높이(약 60px)만큼 보정 → 헤더 포함 전체 뷰포트 기준 정중앙. */
