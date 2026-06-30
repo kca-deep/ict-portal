@@ -507,7 +507,7 @@ export default function Home() {
               {!atBottom && (
                 <button
                   onClick={scrollToBottom}
-                  className="absolute -top-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1 rounded-full bg-card text-card-foreground text-xs font-medium px-3 py-1.5 shadow-lg border border-border hover:bg-muted/40 transition-colors"
+                  className="absolute -top-7 left-1/2 -translate-x-1/2 inline-flex items-center gap-1 rounded-full bg-card text-card-foreground text-xs font-medium px-3 py-1.5 shadow-lg border border-border hover:bg-muted/40 transition-colors"
                 >
                   ↓ 최신으로
                 </button>
