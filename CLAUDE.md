@@ -84,6 +84,8 @@ pnpm db:reset     # DB 초기화
 | `04-feature-advisor.md` | ① 어드바이저 RAG 파이프라인(관련도 분기·법제처 직접 호출) |
 | `05-feature-crawler.md` | ② 공모사업 크롤러 설계 (8월 예정) |
 | `07-security-ops.md` | 보안·운영·키 관리·하드닝 정책 |
+| `08-known-issues.md` | 알려진 이슈·한계 기록 |
+| `09-chat-flow.md` | ① 챗봇 라우팅(규정/법령/범위밖) + 참조문서·답변 로직 순서도 |
 
 ## Git 사용
 
