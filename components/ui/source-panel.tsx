@@ -26,7 +26,7 @@ export function kindOf(source: SourceChunk): SourceKind {
 }
 
 // 출처 종류별 뱃지 (📘 내부규정=블루 / ⚖️ 법령·판례=앰버). 공모공고(8월)=그린 추가 예정.
-// 아티팩트 패널은 잉크 다크 배경이라, 뱃지는 밝은 중립 칩으로 두고(가독성) 종류 색은
+// 패널은 웜 라이트 면이라 뱃지는 흰 칩(bg-card)으로 대비를 주고, 종류 색은
 // 패널 좌측 보더(borderClass)가 담당한다 — 색약 안전한 의미 구분.
 const BADGE: Record<
   SourceKind,
@@ -77,37 +77,38 @@ export function SourcePanel({
           md:static md:inset-auto md:z-auto md:h-full md:max-h-none md:w-2/5 md:shrink-0 md:p-5 md:pl-2.5
         "
       >
-        {/* 잉크 다크 집중 패널 — 좌측 보더가 출처 종류 색(블루/앰버). artifact-ink: 내부
-            마크다운(표·코드)이 잉크 토큰을 쓰도록 스코프 오버라이드(흰 표 카드 묻힘 방지). */}
-        <div className={`artifact-ink flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 border-l-4 ${badge.borderClass} bg-secondary text-secondary-foreground shadow-2xl ring-1 ring-black/20`}>
+        {/* 웜 라이트 집중 패널 — 좌측 보더가 출처 종류 색(블루/앰버). 답변 말풍선과 같은
+            웜 톤(accent)으로 맞춰 어두운 패널의 이질감을 없앤다. 내부 마크다운(표·코드)은
+            기본 라이트 토큰으로 렌더되어 별도 스코프 오버라이드가 필요 없다. */}
+        <div className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-border border-l-4 ${badge.borderClass} bg-accent text-accent-foreground shadow-[7px_7px_8px_-1px_rgba(0,0,0,0.25)] ring-1 ring-black/5`}>
           {/* 헤더: 뱃지(종류·관련도) · 제목 · 닫기 */}
-          <div className="flex items-start gap-3 border-b border-white/10 px-8 py-5 shrink-0">
+          <div className="flex items-start gap-3 border-b border-border px-8 py-5 shrink-0">
             {/* 종류 + 관련도(내부 규정만)를 한 뱃지 카드 안에 줄바꿈으로 표시 */}
-            <span className="mt-0.5 inline-flex shrink-0 flex-col items-center gap-0.5 rounded-xl bg-white/10 px-2.5 py-1 text-secondary-foreground">
+            <span className="mt-0.5 inline-flex shrink-0 flex-col items-center gap-0.5 rounded-xl bg-card px-2.5 py-1 text-accent-foreground">
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold">
                 <span aria-hidden>{badge.icon}</span>
                 {badge.label}
               </span>
               {kind === "regulation" && (
-                <span className="text-[10px] font-medium tabular-nums text-secondary-foreground/75">
+                <span className="text-[10px] font-medium tabular-nums text-muted-foreground">
                   관련도 {percent}%
                 </span>
               )}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[15px] font-semibold text-secondary-foreground">
-                <span className="text-secondary-foreground/55">[{index + 1}] </span>
+              <p className="truncate text-[15px] font-semibold text-accent-foreground">
+                <span className="text-muted-foreground">[{index + 1}] </span>
                 {source.title ?? "(제목 없음)"}
               </p>
               {article && (
-                <p className="mt-0.5 truncate text-xs text-secondary-foreground/65">{article}</p>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">{article}</p>
               )}
             </div>
             <button
               type="button"
               onClick={onClose}
               aria-label="근거 패널 닫기"
-              className="-mr-1.5 -mt-1 shrink-0 rounded-full p-2 text-secondary-foreground/70 transition-colors hover:bg-white/10 hover:text-secondary-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="-mr-1.5 -mt-1 shrink-0 rounded-full p-2 text-muted-foreground transition-colors hover:bg-black/5 hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <svg
                 width="18"
@@ -124,7 +125,7 @@ export function SourcePanel({
           </div>
 
           {/* 본문: 조문 원문 (Streamdown 은 currentColor 상속 → 밝은 텍스트로 렌더) */}
-          <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6 text-sm text-secondary-foreground">
+          <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6 text-sm text-accent-foreground">
             {/* 패널 본문은 행간을 채팅 말풍선보다 살짝 좁힌다 */}
             <Response className="leading-tight [&_p]:leading-tight [&_li]:leading-tight">
               {source.content}
@@ -132,14 +133,14 @@ export function SourcePanel({
           </div>
 
           {/* 푸터: 출처 / 법제처 링크 (관련도는 헤더 뱃지로 이동) */}
-          <div className="shrink-0 space-y-2 border-t border-white/10 px-8 py-5 text-[11px] text-secondary-foreground/70">
+          <div className="shrink-0 space-y-2 border-t border-border px-8 py-5 text-[11px] text-muted-foreground">
             {source.source_ref && <p className="break-words">출처: {source.source_ref}</p>}
             {lawUrl && (
               <a
                 href={lawUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 font-semibold text-secondary-foreground underline underline-offset-2 hover:text-white"
+                className="inline-flex items-center gap-1 font-semibold text-primary underline underline-offset-2 hover:text-primary/80"
               >
                 법제처 원문 ↗
               </a>

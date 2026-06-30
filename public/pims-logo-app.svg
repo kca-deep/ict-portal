@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400" role="img" aria-label="PIMS">
+  <defs>
+    <linearGradient id="pimsAppSky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6fb7f0"/><stop offset="1" stop-color="#3d93de"/>
+    </linearGradient>
+    <linearGradient id="pimsAppTail" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffce5c"/><stop offset="1" stop-color="#f39b1e"/>
+    </linearGradient>
+    <linearGradient id="pimsAppP" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffc62b"/><stop offset="1" stop-color="#f5a50d"/>
+    </linearGradient>
+  </defs>
+  <rect x="28" y="92" width="344" height="200" rx="66" fill="#ffffff" stroke="url(#pimsAppSky)" stroke-width="15"/>
+  <path d="M118 272 L82 360 Q76 372 90 364 L166 314 Z" fill="url(#pimsAppTail)"/>
+  <text x="200" y="224" text-anchor="middle"
+        font-family="'Pretendard','Segoe UI',Arial,sans-serif" font-weight="800"
+        letter-spacing="1"><tspan font-size="112" fill="url(#pimsAppP)">P</tspan><tspan font-size="100" fill="#2a7df0">IMS</tspan></text>
+</svg>

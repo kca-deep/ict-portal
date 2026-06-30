@@ -343,47 +343,47 @@ export default function Home() {
           >
           <div className="flex items-center gap-3">
             <svg
-              viewBox="0 0 400 400"
+              viewBox="10 78 380 292"
               role="img"
               aria-label="PIMS 어드바이저 로고"
-              className="w-11 h-11 shrink-0"
+              className="h-12 w-[62px] shrink-0"
             >
               <defs>
-                <linearGradient
-                  id="pimsBlueP"
-                  x1="60"
-                  y1="60"
-                  x2="240"
-                  y2="330"
-                  gradientUnits="userSpaceOnUse"
-                >
-                  <stop offset="0" stopColor="#1e72c6" />
-                  <stop offset="1" stopColor="#0e4c92" />
-                </linearGradient>
-                <linearGradient
-                  id="pimsSky"
-                  x1="190"
-                  y1="80"
-                  x2="320"
-                  y2="330"
-                  gradientUnits="userSpaceOnUse"
-                >
+                <linearGradient id="pimsAppSky" x1="0" y1="0" x2="1" y2="1">
                   <stop offset="0" stopColor="#6fb7f0" />
                   <stop offset="1" stopColor="#3d93de" />
                 </linearGradient>
-                <mask id="pimsCut">
-                  <rect x="60" y="60" width="280" height="280" rx="46" fill="#fff" />
-                  <circle cx="430" cy="430" r="200" fill="#000" />
-                </mask>
+                <linearGradient id="pimsAppTail" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stopColor="#ffce5c" />
+                  <stop offset="1" stopColor="#f39b1e" />
+                </linearGradient>
+                <linearGradient id="pimsAppP" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stopColor="#ffc62b" />
+                  <stop offset="1" stopColor="#f5a50d" />
+                </linearGradient>
               </defs>
-              <g mask="url(#pimsCut)">
-                <rect x="60" y="60" width="280" height="280" fill="url(#pimsSky)" />
-                <path
-                  d="M200 60 A70 70 0 0 1 200 200 A70 70 0 0 0 200 340 L60 340 L60 60 Z"
-                  fill="url(#pimsBlueP)"
-                />
-              </g>
-              <circle cx="168" cy="125" r="23" fill="#fff" />
+              <rect
+                x="28"
+                y="92"
+                width="344"
+                height="200"
+                rx="66"
+                fill="#ffffff"
+                stroke="url(#pimsAppSky)"
+                strokeWidth="15"
+              />
+              <path d="M118 272 L82 360 Q76 372 90 364 L166 314 Z" fill="url(#pimsAppTail)" />
+              <text
+                x="200"
+                y="224"
+                textAnchor="middle"
+                fontFamily="'Pretendard','Segoe UI',Arial,sans-serif"
+                fontWeight="800"
+                letterSpacing="1"
+              >
+                <tspan fontSize="112" fill="url(#pimsAppP)">P</tspan>
+                <tspan fontSize="100" fill="#2a7df0">IMS</tspan>
+              </text>
             </svg>
             <div className="flex flex-col justify-center h-11">
               <h1
@@ -446,20 +446,20 @@ export default function Home() {
             ) : (
               <div key={i} className="flex justify-start">
                 <div className="max-w-[92%] flex flex-col gap-2">
-                  <div className="rounded-2xl rounded-tl-md px-4 py-3 bg-accent text-accent-foreground border border-border shadow-sm break-words">
+                  <div className="rounded-2xl rounded-tl-md px-4 py-3 bg-card text-card-foreground border border-border shadow-sm break-words">
                     {m.content ? (
                       <Response>{m.content}</Response>
                     ) : (
-                      <span className="inline-flex gap-1 items-center text-accent-foreground/70">
-                        <span className="w-1.5 h-1.5 rounded-full bg-accent-foreground animate-bounce [animation-delay:-0.3s]" />
-                        <span className="w-1.5 h-1.5 rounded-full bg-accent-foreground animate-bounce [animation-delay:-0.15s]" />
-                        <span className="w-1.5 h-1.5 rounded-full bg-accent-foreground animate-bounce" />
+                      <span className="inline-flex gap-1 items-center text-card-foreground/70">
+                        <span className="w-1.5 h-1.5 rounded-full bg-card-foreground animate-bounce [animation-delay:-0.3s]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-card-foreground animate-bounce [animation-delay:-0.15s]" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-card-foreground animate-bounce" />
                       </span>
                     )}
                     {m.content && !(loading && i === messages.length - 1) && (
                       <>
                         {/* 모든 답변 끝에 고정 표시되는 면책 안내(LLM 출력과 무관). */}
-                        <div className="mt-3 pt-3 border-t border-accent-foreground/15 flex gap-2 text-[13px] italic leading-relaxed text-muted-foreground">
+                        <div className="mt-3 pt-3 border-t border-card-foreground/15 flex gap-2 text-[13px] italic leading-relaxed text-muted-foreground">
                           <TriangleAlert
                             className="w-4 h-4 shrink-0 mt-0.5 text-amber-500"
                             aria-hidden
@@ -595,7 +595,7 @@ function Sources({
   onOpen: (source: SourceChunk, index: number) => void;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card text-card-foreground shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-border bg-accent text-accent-foreground shadow-sm overflow-hidden">
       <div className="px-3 py-2 text-xs font-semibold text-muted-foreground border-b border-border">
         참조 문서 {sources.length}건
       </div>
@@ -631,7 +631,9 @@ function SourceItem({
   const isPrecedent = kind === "precedent";
   const percent = relevancePercent(source.score);
   // 출처 종류 = 좌측 보더 색(색약 안전). 법령·판례=앰버 / 규정=블루.
-  const borderClass = isLaw || isPrecedent ? "border-l-badge-law" : "border-l-badge-regulation";
+  // divide-border가 첫 항목 외 자식의 border-color(전 방향)를 덮어써 2번째 이후의
+  // 좌측 색이 중성 보더로 바뀐다 → 좌측 색만 !important로 고정해 divide를 이긴다.
+  const borderClass = isLaw || isPrecedent ? "!border-l-badge-law" : "!border-l-badge-regulation";
 
   return (
     <li className={`text-xs border-l-2 ${borderClass}`}>

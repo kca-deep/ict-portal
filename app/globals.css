@@ -111,18 +111,3 @@
     @apply bg-background text-foreground font-sans;
   }
 }
-
-/* 아티팩트(근거 원문) 잉크 패널 — 그 안의 마크다운 렌더러(Streamdown)는 bg-muted·
-   bg-background·border·text-foreground 토큰으로 표/코드 카드를 그린다. 패널만 어둡게
-   하면 이 토큰들이 라이트(흰색) 값이라 흰 표 카드 위에 밝은 글씨가 묻힌다(흰 위 흰색).
-   여기서 토큰을 잉크 다크로 스코프 오버라이드해 표·코드가 잉크 카드+밝은 글씨로 렌더되게
-   한다. (.dark 전체 전환은 시맨틱 보더가 옛 다크 뱃지값을 쓰게 돼 회피하고, 스코프만 덮는다.) */
-.artifact-ink {
-  --background: oklch(0.2700 0.0120 255); /* 패널 잉크와 동일 면 */
-  --card: oklch(0.3100 0.0120 255);
-  --popover: oklch(0.3100 0.0120 255);
-  --muted: oklch(0.3100 0.0120 255);      /* 표·코드 카드(살짝 밝은 잉크) */
-  --muted-foreground: oklch(0.7200 0.0080 75);
-  --foreground: oklch(0.9300 0.0080 75);  /* 밝은 본문 */
-  --border: oklch(0.4200 0.0100 255);     /* 잉크 위 가시 보더 */
-}
