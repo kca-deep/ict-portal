@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import {
   ragChatStream,
   isInScope,
+  isRegulationSufficient,
   type ChatMessage,
   type RetrievedDoc,
 } from "@/lib/ai/llm-router";
@@ -195,21 +196,35 @@ export async function POST(req: NextRequest) {
           metadata: s.metadata,
         }));
 
-        // 4) 관련도 분기 — 내부 규정 최상위 관련도가 RELEVANCE_THRESHOLD 미만이면
-        //    법제처 법령·판례로 보강한다. 구 sufficiency 게이트((b) 조건: LLM이
-        //    "내부 규정만으로 불충분"을 판정)는 재정렬 청크 변동에 민감해 제거됐다.
+        // 4) 관련도 분기 — 내부 규정 최상위 관련도(maxScore)로 규정/법령을 가른다.
+        //    · maxScore ≥ RELEVANCE_GRAY_UPPER : 자신있는 규정 근거 → 규정 분기(게이트 생략)
+        //    · RELEVANCE_THRESHOLD ≤ maxScore < GRAY_UPPER : 회색지대 → LLM 적합성 게이트로
+        //      "규정만으로 질의 핵심에 답 가능?"을 재판정(NO면 법령). 노이즈 규정청크가
+        //      임계치를 근소하게(예: 0.35 vs 0.33) 넘겨 법령 질의를 규정으로 오라우팅하던
+        //      문제를 차단한다 — 단, 게이트는 회색지대에서만 호출해 청크 변동 민감성을 제한.
+        //    · maxScore < RELEVANCE_THRESHOLD : 규정 근거 없음 → (범위 내면) 법령 분기
         const maxScore = sources.length > 0 ? sources[0].score : 0;
         const belowThreshold = maxScore < env.RELEVANCE_THRESHOLD;
+        const inGrayZone =
+          !belowThreshold && maxScore < env.RELEVANCE_GRAY_UPPER;
+
+        // 회색지대 적합성 게이트: 규정 발췌만으로 질의 핵심에 답할 근거가 없으면(NO) 법령으로.
+        // 자신있는 고득점(≥ GRAY_UPPER) 규정은 게이트를 호출하지 않는다. 게이트 실패 시
+        // isRegulationSufficient 가 true(충분)로 폴백 → 규정 유지(게이트 장애가 답변을 막지 않음).
+        const grayZoneInsufficient = inGrayZone
+          ? !(await isRegulationSufficient(query, retrievedDocs))
+          : false;
 
         // 범위 게이트: 규정 관련도가 낮은 질의(잡담 포함)는 법령 분기 전에 서비스
         // 범위(법령·규정·행정·공공기금)인지 확인한다. 범위 밖이면 법령·판례 검색과
-        // 참조문서를 모두 생략하고 정중한 거절만 스트리밍한다.
+        // 참조문서를 모두 생략하고 정중한 거절만 스트리밍한다. 회색지대(규정에 일부
+        // 관련 있어 임계치 통과)는 범위 내로 보고 범위 게이트를 생략한다.
         const outOfScope = belowThreshold ? !(await isInScope(query)) : false;
 
-        // 규정 관련도가 기준치 미만일 때만 법령으로 분기한다. 구 sufficiency 게이트
-        // (isRegulationSufficient)는 top-K 재정렬 청크에 민감해 같은 질의가 토큰 하나로
-        // 규정↔법령을 오가게 만들었다 — 제거하고 안정적 점수 신호만 사용.
-        const routedToLaw = !outOfScope && belowThreshold;
+        // 법령 분기: 규정 근거 없음(belowThreshold) 또는 회색지대 게이트가 불충분 판정.
+        // 범위 밖이면 어느 쪽도 아님(거절).
+        const routedToLaw =
+          !outOfScope && (belowThreshold || grayZoneInsufficient);
 
         let lawContext: string | undefined;
         // 통합: 검색(searchAiLaw)은 LLM 근거(lawContext) + 인용 검증 재사용(retrieved)
@@ -259,7 +274,8 @@ export async function POST(req: NextRequest) {
 
         console.log(
           `[chat] route=${outOfScope ? "out_of_scope" : routedToLaw ? "law" : "regulation"} maxScore=${maxScore.toFixed(3)} ` +
-            `threshold=${env.RELEVANCE_THRESHOLD} belowThreshold=${belowThreshold} ` +
+            `threshold=${env.RELEVANCE_THRESHOLD} grayUpper=${env.RELEVANCE_GRAY_UPPER} ` +
+            `belowThreshold=${belowThreshold} grayZone=${inGrayZone}${inGrayZone ? `(insufficient=${grayZoneInsufficient})` : ""} ` +
             `hits=${hits.length}` +
             (routedToLaw ? ` laws=[${lawRefs.map((r) => r.name).join(", ")}]` : " (법제처 미호출)"),
         );

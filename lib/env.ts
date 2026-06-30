@@ -37,6 +37,10 @@ const envSchema = z.object({
   RERANK_TOP_K: z.coerce.number().default(8),
   // 관련도 분기 기준치 (rerank 최상위 relevanceScore, 0~1). 미만이면 법제처 폴백.
   RELEVANCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.33),
+  // 회색지대 상한 — maxScore 가 [RELEVANCE_THRESHOLD, RELEVANCE_GRAY_UPPER) 이면
+  // 규정 관련도가 애매하다고 보고 LLM 적합성 게이트로 규정/법령을 재판정한다.
+  // 임계치를 근소하게 넘긴 노이즈 규정청크의 오라우팅 차단(예: 0.35 vs 0.33).
+  RELEVANCE_GRAY_UPPER: z.coerce.number().min(0).max(1).default(0.45),
 
   CRAWLER_USER_AGENT: z.string().default("PIMS-Crawler/1.0"),
   CRAWLER_TIMEOUT_MS: z.coerce.number().default(10000),
