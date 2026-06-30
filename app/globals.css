@@ -3,31 +3,35 @@
 @tailwind utilities;
 
 :root {
-  --background: oklch(1.0000 0 0);
-  --foreground: oklch(0.2686 0 0);
-  --card: oklch(1.0000 0 0);
-  --card-foreground: oklch(0.2686 0 0);
-  --popover: oklch(1.0000 0 0);
-  --popover-foreground: oklch(0.2686 0 0);
-  --primary: oklch(0.4882 0.2172 264.3763);
+  /* 테마: "웜 페이퍼 + 명도 4단 + 잉크블루". 순백을 버리고 따뜻한 종이 위에 층층이
+     올라온 면으로 깊이(위계)를 만든다. 모든 표면색 hue≈75(웜 뉴트럴/스톤), 액센트만 잉크블루(255).
+     L0 배경(페이퍼) < L1 카드 < L2 답변카드(웜틴트) ≪ L3 아티팩트(잉크 다크). */
+  --background: oklch(0.9850 0.0040 75);   /* L0 페이퍼 #fcfaf7 */
+  --foreground: oklch(0.2600 0.0120 60);   /* 웜 잉크 #29231e */
+  --card: oklch(1.0000 0.0020 75);         /* L1 참조카드(떠보이는 면) */
+  --card-foreground: oklch(0.2600 0.0120 60);
+  --popover: oklch(1.0000 0.0020 75);
+  --popover-foreground: oklch(0.2600 0.0120 60);
+  --primary: oklch(0.4600 0.1350 255);     /* 잉크블루 #1657a1 (사용자 버블·버튼·뱃지) */
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.9670 0.0029 264.5419);
-  --secondary-foreground: oklch(0.4461 0.0263 256.8018);
-  --muted: oklch(0.9846 0.0017 247.8389);
-  --muted-foreground: oklch(0.5510 0.0234 264.3637);
-  --accent: oklch(0.9869 0.0214 264.5419);
-  --accent-foreground: oklch(0.4732 0.1247 264.5419);
-  /* 출처 종류 뱃지 색 (source-panel) — 의미 구분용. regulation=파랑 / law·precedent=보라 */
-  --badge-regulation: oklch(0.5461 0.2152 262.8809);
-  --badge-law: oklch(0.5413 0.2466 293.0090);
-  --destructive: oklch(0.6368 0.2078 25.3313);
+  --secondary: oklch(0.2700 0.0120 255);   /* L3 아티팩트 잉크 다크 패널 #23272c */
+  --secondary-foreground: oklch(0.9300 0.0080 75); /* 잉크 패널 위 밝은 텍스트 */
+  --muted: oklch(0.9700 0.0050 75);        /* 웜 라이트 면 */
+  --muted-foreground: oklch(0.5200 0.0150 75); /* 웜 그레이 #6e6860 (AA 5.4) */
+  --accent: oklch(0.9650 0.0060 75);       /* L2 답변카드 웜 틴트 #f6f3ef */
+  --accent-foreground: oklch(0.2600 0.0120 60);
+  /* 출처 종류 색 (source-panel·참조 보더) — 색약 안전 분리. 규정=블루 / 법령·판례=앰버 / 공모=그린 */
+  --badge-regulation: oklch(0.5200 0.1500 245);  /* 기관 블루 #006eb8 */
+  --badge-law: oklch(0.5600 0.1200 70);          /* 앰버/오커(직인) #a06604 */
+  --badge-announcement: oklch(0.5500 0.1100 150);/* 그린(공모, 8월) #3b834e */
+  --destructive: oklch(0.5500 0.2000 27);  /* 딥레드 #cc2827 (AA 5.3, 기존 red-500 미달 개선) */
   --destructive-foreground: oklch(1.0000 0 0);
-  --border: oklch(0.9276 0.0058 264.5313);
-  --input: oklch(0.9276 0.0058 264.5313);
-  --ring: oklch(0.7686 0.1647 264.5419);
-  /* 입력창(composer) — 연한 파랑 톤 배경·테두리 (page.tsx 하드코딩 대체) */
-  --composer: #f3f9ff;
-  --composer-border: #dceefc;
+  --border: oklch(0.9000 0.0060 75);       /* 웜 라이트 보더 */
+  --input: oklch(0.9000 0.0060 75);
+  --ring: oklch(0.4600 0.1350 255);        /* 포커스 링 = 잉크블루 */
+  /* 입력창(composer) — L1 웜 화이트 면 + 웜 보더 (토큰화) */
+  --composer: oklch(0.9920 0.0040 75);
+  --composer-border: oklch(0.8800 0.0080 75);
   --chart-1: oklch(0.7686 0.1647 264.5419);
   --chart-2: oklch(0.6658 0.1574 264.5419);
   --chart-3: oklch(0.5553 0.1455 264.5419);
@@ -44,7 +48,7 @@
   --font-sans: Inter, sans-serif;
   --font-serif: Source Serif 4, serif;
   --font-mono: JetBrains Mono, monospace;
-  --radius: 0.375rem;
+  --radius: 0.5rem;
   --shadow-x: 0px;
   --shadow-y: 4px;
   --shadow-blur: 8px;
@@ -106,4 +110,19 @@
   body {
     @apply bg-background text-foreground font-sans;
   }
+}
+
+/* 아티팩트(근거 원문) 잉크 패널 — 그 안의 마크다운 렌더러(Streamdown)는 bg-muted·
+   bg-background·border·text-foreground 토큰으로 표/코드 카드를 그린다. 패널만 어둡게
+   하면 이 토큰들이 라이트(흰색) 값이라 흰 표 카드 위에 밝은 글씨가 묻힌다(흰 위 흰색).
+   여기서 토큰을 잉크 다크로 스코프 오버라이드해 표·코드가 잉크 카드+밝은 글씨로 렌더되게
+   한다. (.dark 전체 전환은 시맨틱 보더가 옛 다크 뱃지값을 쓰게 돼 회피하고, 스코프만 덮는다.) */
+.artifact-ink {
+  --background: oklch(0.2700 0.0120 255); /* 패널 잉크와 동일 면 */
+  --card: oklch(0.3100 0.0120 255);
+  --popover: oklch(0.3100 0.0120 255);
+  --muted: oklch(0.3100 0.0120 255);      /* 표·코드 카드(살짝 밝은 잉크) */
+  --muted-foreground: oklch(0.7200 0.0080 75);
+  --foreground: oklch(0.9300 0.0080 75);  /* 밝은 본문 */
+  --border: oklch(0.4200 0.0100 255);     /* 잉크 위 가시 보더 */
 }

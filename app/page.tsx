@@ -335,7 +335,7 @@ export default function Home() {
     <main className="flex h-screen bg-background">
       <div className="flex-1 flex flex-col h-full min-w-0">
         {/* Header — 하단 구분선을 전체 가로 폭으로 표시, 내용만 채팅 컬럼에 정렬 */}
-        <header className="shrink-0 border-b border-border bg-background/80 backdrop-blur-sm">
+        <header className="shrink-0 border-b-2 border-b-primary/25 bg-background/80 backdrop-blur-sm">
           <div
             className={`flex items-center justify-between px-6 py-2 ${
               activeSource ? "" : "max-w-3xl mx-auto"
@@ -446,7 +446,7 @@ export default function Home() {
             ) : (
               <div key={i} className="flex justify-start">
                 <div className="max-w-[92%] flex flex-col gap-2">
-                  <div className="rounded-2xl rounded-tl-md px-4 py-3 bg-accent text-accent-foreground shadow-sm break-words">
+                  <div className="rounded-2xl rounded-tl-md px-4 py-3 bg-accent text-accent-foreground border border-border shadow-sm break-words">
                     {m.content ? (
                       <Response>{m.content}</Response>
                     ) : (
@@ -630,9 +630,11 @@ function SourceItem({
   const isLaw = kind === "law";
   const isPrecedent = kind === "precedent";
   const percent = relevancePercent(source.score);
+  // 출처 종류 = 좌측 보더 색(색약 안전). 법령·판례=앰버 / 규정=블루.
+  const borderClass = isLaw || isPrecedent ? "border-l-badge-law" : "border-l-badge-regulation";
 
   return (
-    <li className="text-xs">
+    <li className={`text-xs border-l-2 ${borderClass}`}>
       <button
         onClick={onOpen}
         className={`w-full flex items-start gap-2 px-3 py-2 text-left transition-colors ${
@@ -659,21 +661,21 @@ function SourceItem({
         </span>
         {isLaw ? (
           <span
-            className="shrink-0 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary mt-0.5"
+            className="shrink-0 inline-flex items-center rounded-full bg-badge-law/12 px-1.5 py-0.5 text-[10px] font-semibold text-badge-law mt-0.5"
             title="법제처 국가법령정보"
           >
             법제처 법령
           </span>
         ) : isPrecedent ? (
           <span
-            className="shrink-0 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary mt-0.5"
+            className="shrink-0 inline-flex items-center rounded-full bg-badge-law/12 px-1.5 py-0.5 text-[10px] font-semibold text-badge-law mt-0.5"
             title="법제처 판례·헌재결정"
           >
             판례
           </span>
         ) : (
           <span
-            className="shrink-0 inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-primary mt-0.5"
+            className="shrink-0 inline-flex items-center rounded-full bg-badge-regulation/12 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-badge-regulation mt-0.5"
             title="검색 관련도 (Cohere rerank)"
           >
             {percent}% 관련도

@@ -25,24 +25,16 @@ export function kindOf(source: SourceChunk): SourceKind {
   return "regulation";
 }
 
-// 출처 종류별 색 뱃지 (📘 내부규정=파랑 / ⚖️ 법령·판례=보라).
-// 8월 공모공고가 추가되면 여기에 초록색 한 종류만 더하면 된다.
-const BADGE: Record<SourceKind, { icon: string; label: string; cls: string }> = {
-  regulation: {
-    icon: "📘",
-    label: "내부규정",
-    cls: "bg-badge-regulation/15 text-badge-regulation",
-  },
-  law: {
-    icon: "⚖️",
-    label: "법령",
-    cls: "bg-badge-law/15 text-badge-law",
-  },
-  precedent: {
-    icon: "⚖️",
-    label: "판례",
-    cls: "bg-badge-law/15 text-badge-law",
-  },
+// 출처 종류별 뱃지 (📘 내부규정=블루 / ⚖️ 법령·판례=앰버). 공모공고(8월)=그린 추가 예정.
+// 아티팩트 패널은 잉크 다크 배경이라, 뱃지는 밝은 중립 칩으로 두고(가독성) 종류 색은
+// 패널 좌측 보더(borderClass)가 담당한다 — 색약 안전한 의미 구분.
+const BADGE: Record<
+  SourceKind,
+  { icon: string; label: string; borderClass: string }
+> = {
+  regulation: { icon: "📘", label: "내부규정", borderClass: "border-l-badge-regulation" },
+  law: { icon: "⚖️", label: "법령", borderClass: "border-l-badge-law" },
+  precedent: { icon: "⚖️", label: "판례", borderClass: "border-l-badge-law" },
 };
 
 /**
@@ -85,30 +77,37 @@ export function SourcePanel({
           md:static md:inset-auto md:z-auto md:h-full md:max-h-none md:w-2/5 md:shrink-0 md:p-5 md:pl-2.5
         "
       >
-        {/* 떠 있는 둥근 옅은색 카드 */}
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-border/70 bg-secondary text-secondary-foreground shadow-2xl ring-1 ring-black/5">
-          {/* 헤더: 뱃지 · 제목 · 닫기 */}
-          <div className="flex items-start gap-3 border-b border-border/60 px-8 py-5 shrink-0">
-            <span
-              className={`mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${badge.cls}`}
-            >
-              <span aria-hidden>{badge.icon}</span>
-              {badge.label}
+        {/* 잉크 다크 집중 패널 — 좌측 보더가 출처 종류 색(블루/앰버). artifact-ink: 내부
+            마크다운(표·코드)이 잉크 토큰을 쓰도록 스코프 오버라이드(흰 표 카드 묻힘 방지). */}
+        <div className={`artifact-ink flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 border-l-4 ${badge.borderClass} bg-secondary text-secondary-foreground shadow-2xl ring-1 ring-black/20`}>
+          {/* 헤더: 뱃지(종류·관련도) · 제목 · 닫기 */}
+          <div className="flex items-start gap-3 border-b border-white/10 px-8 py-5 shrink-0">
+            {/* 종류 + 관련도(내부 규정만)를 한 뱃지 카드 안에 줄바꿈으로 표시 */}
+            <span className="mt-0.5 inline-flex shrink-0 flex-col items-center gap-0.5 rounded-xl bg-white/10 px-2.5 py-1 text-secondary-foreground">
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold">
+                <span aria-hidden>{badge.icon}</span>
+                {badge.label}
+              </span>
+              {kind === "regulation" && (
+                <span className="text-[10px] font-medium tabular-nums text-secondary-foreground/75">
+                  관련도 {percent}%
+                </span>
+              )}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[15px] font-semibold text-foreground">
-                <span className="text-muted-foreground">[{index + 1}] </span>
+              <p className="truncate text-[15px] font-semibold text-secondary-foreground">
+                <span className="text-secondary-foreground/55">[{index + 1}] </span>
                 {source.title ?? "(제목 없음)"}
               </p>
               {article && (
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">{article}</p>
+                <p className="mt-0.5 truncate text-xs text-secondary-foreground/65">{article}</p>
               )}
             </div>
             <button
               type="button"
               onClick={onClose}
               aria-label="근거 패널 닫기"
-              className="-mr-1.5 -mt-1 shrink-0 rounded-full p-2 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="-mr-1.5 -mt-1 shrink-0 rounded-full p-2 text-secondary-foreground/70 transition-colors hover:bg-white/10 hover:text-secondary-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <svg
                 width="18"
@@ -124,26 +123,23 @@ export function SourcePanel({
             </button>
           </div>
 
-          {/* 본문: 조문 원문 */}
-          <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6 text-sm text-foreground">
+          {/* 본문: 조문 원문 (Streamdown 은 currentColor 상속 → 밝은 텍스트로 렌더) */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6 text-sm text-secondary-foreground">
             {/* 패널 본문은 행간을 채팅 말풍선보다 살짝 좁힌다 */}
             <Response className="leading-tight [&_p]:leading-tight [&_li]:leading-tight">
               {source.content}
             </Response>
           </div>
 
-          {/* 푸터: 관련도 / 출처 / 법제처 링크 */}
-          <div className="shrink-0 space-y-2 border-t border-border/60 px-8 py-5 text-[11px] text-muted-foreground">
-            {kind === "regulation" && (
-              <p className="font-medium text-foreground/80">관련도 {percent}%</p>
-            )}
+          {/* 푸터: 출처 / 법제처 링크 (관련도는 헤더 뱃지로 이동) */}
+          <div className="shrink-0 space-y-2 border-t border-white/10 px-8 py-5 text-[11px] text-secondary-foreground/70">
             {source.source_ref && <p className="break-words">출처: {source.source_ref}</p>}
             {lawUrl && (
               <a
                 href={lawUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 font-semibold text-badge-law hover:underline"
+                className="inline-flex items-center gap-1 font-semibold text-secondary-foreground underline underline-offset-2 hover:text-white"
               >
                 법제처 원문 ↗
               </a>

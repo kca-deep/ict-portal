@@ -46,6 +46,7 @@ const config: Config = {
         },
         "badge-regulation": "var(--badge-regulation)",
         "badge-law": "var(--badge-law)",
+        "badge-announcement": "var(--badge-announcement)",
         composer: {
           DEFAULT: "var(--composer)",
           border: "var(--composer-border)",
