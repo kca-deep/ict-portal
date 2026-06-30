@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400" role="img" aria-label="PIMS">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5cbcff"/><stop offset="1" stop-color="#2a7df0"/>
+    </linearGradient>
+    <linearGradient id="tail" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffce5c"/><stop offset="1" stop-color="#f39b1e"/>
+    </linearGradient>
+    <linearGradient id="p" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffc62b"/><stop offset="1" stop-color="#f5a50d"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="400" rx="92" fill="url(#tile)"/>
+  <rect x="36" y="92" width="328" height="196" rx="62" fill="#ffffff"/>
+  <path d="M118 268 L82 356 Q76 368 90 360 L166 310 Z" fill="url(#tail)"/>
+  <text x="200" y="228" text-anchor="middle"
+        font-family="'Pretendard','Segoe UI',Arial,sans-serif" font-weight="800"
+        letter-spacing="1"><tspan font-size="130" fill="url(#p)">P</tspan><tspan font-size="116" fill="#2a7df0">IMS</tspan></text>
+</svg>
