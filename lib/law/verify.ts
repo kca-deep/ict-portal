@@ -3,6 +3,7 @@ import {
   searchByName,
   fetchArticleMap,
   type LawRef,
+  type RetrievedLaws,
 } from "@/lib/law/search";
 import { expandLawAbbreviation } from "@/lib/law/abbreviations";
 
@@ -98,7 +99,7 @@ const GENERIC_LAW_TOKENS = new Set([
 ]);
 
 // 법령명 → 대표 LawRef. 과포착(앞 단어 혼입) 대비 전체 → 앞 토큰 제거 순으로 재시도.
-// 각 시도에서 정확매칭(공백 무시) 우선, 없으면 1위 부분매칭.
+// 각 시도에서 정확매칭(공백 무시) 우선, 없으면 후보명과 실제 관련된(포함관계) 1위.
 async function resolveLaw(
   oc: string,
   lawName: string,
@@ -109,17 +110,51 @@ async function resolveLaw(
     const candidate = (tokens.slice(start).join(" ") || lawName).trim();
     // 일반어 한 개로 축약된 후보는 변별력이 없어 거부(다음 시도도 더 짧아질 뿐이라 종료).
     if (GENERIC_LAW_TOKENS.has(candidate)) break;
+    const cand = noSpace(candidate);
     const refs = await searchByName(oc, candidate, 5);
-    if (refs.length > 0) {
-      const exact = refs.find((r) => noSpace(r.name) === noSpace(candidate));
-      return exact ?? refs[0];
-    }
+    const exact = refs.find((r) => noSpace(r.name) === cand);
+    if (exact) return exact;
+    // refs[0] 무조건 채택 금지 — 법제처 lawSearch.do 는 무매칭 질의에 무관한 기본
+    // 목록을 반환할 때가 있어(예: "상법" → "1980년해직공무원…법" 1위), 그 junk 의
+    // 1위를 그대로 쓰면 인용이 엉뚱한 법으로 둔갑한다(거짓 환각). 후보명과 포함관계가
+    // 있는 후보만 채택하고, 없으면 다음 시도(앞토큰 제거)로 넘어가 결국 null 을 반환.
+    const related = refs.find((r) => {
+      const n = noSpace(r.name);
+      return n.includes(cand) || cand.includes(n);
+    });
+    if (related) return related;
   }
   return null;
 }
 
+// 검색이 이미 회수한 조문에서 인용을 먼저 찾는다(법제처 재조회 회피). 정규화 법령명
+// 정확매칭 우선, 없으면 포함매칭(답변이 약간 다른 표기로 인용한 경우). 조문키는 검색·
+// 인용 모두 "제N조"/"제N조의M" 동일 포맷이라 그대로 대조. 표시 법령명은 인용 원문(c.lawName,
+// 답변이 컨텍스트에서 그대로 가져온 정식명)을 그대로 쓴다.
+function lookupRetrieved(
+  retrieved: RetrievedLaws | undefined,
+  lawName: string,
+  article: string,
+): { lawId: string; title: string; body: string } | null {
+  if (!retrieved) return null;
+  const key = lawName.replace(/\s+/g, "");
+  let lawId = retrieved.nameToId.get(key);
+  if (!lawId) {
+    for (const [n, id] of retrieved.nameToId) {
+      if (n.includes(key) || key.includes(n)) {
+        lawId = id;
+        break;
+      }
+    }
+  }
+  if (!lawId) return null;
+  const art = retrieved.articles.get(lawId)?.get(article);
+  return art ? { lawId, title: art.title, body: art.body } : null;
+}
+
 export async function verifyCitations(
   text: string,
+  retrieved?: RetrievedLaws,
   maxCitations = 15,
 ): Promise<CitationCheck> {
   const oc = env.LAW_GO_KR_API_KEY;
@@ -146,12 +181,28 @@ export async function verifyCitations(
   const verdicts = await Promise.all(
     parsed.map(async (c): Promise<CitationVerdict> => {
       try {
-        const { ref, map } = await lawInfo(c.lawName);
-        if (!ref) {
+        // 1) 검색이 이미 회수한 조문이면 법제처 재조회 없이 검증 완료(통합 핵심).
+        //    aiSearch 본문은 법제처 공식 데이터라 실존이 이미 확인된 셈.
+        const hit = lookupRetrieved(retrieved, c.lawName, c.article);
+        if (hit) {
           return {
             ...c,
-            status: "not_found",
-            note: "법제처 DB에 해당 법령 없음 (법령명 오류 또는 미존재)",
+            status: "verified",
+            lawId: hit.lawId,
+            articleTitle: hit.title || undefined,
+            body: hit.body,
+          };
+        }
+        // 2) 검색에 없던 인용(모델 지식 인용 등) → 법제처 조회로 실존·환각 판정.
+        const { ref, map } = await lawInfo(c.lawName);
+        if (!ref) {
+          // 법령명 자체를 해석 못함(법제처 조회 불일치). 이는 "실존 법의 없는 조문"(환각)과
+          // 달라 not_found(환각)로 단정하지 않고 ambiguous(검증 보류)로 둔다 — 거짓 환각
+          // 경고 방지. hasHallucination 은 not_found 만 트리거한다.
+          return {
+            ...c,
+            status: "ambiguous",
+            note: "법령명 해석 실패 — 검증 보류 (법제처 조회 불일치)",
           };
         }
         const found = map.get(c.article);

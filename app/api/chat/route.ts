@@ -7,7 +7,7 @@ import {
 } from "@/lib/ai/llm-router";
 import { regulationSearch, type DocumentHit } from "@/lib/db/search";
 import { rerank } from "@/lib/ai/rerank";
-import { searchAiLaw, formatArticle } from "@/lib/law/search";
+import { searchAiLaw, formatArticle, type RetrievedLaws } from "@/lib/law/search";
 import {
   searchDecisions,
   getDecisionText,
@@ -212,7 +212,11 @@ export async function POST(req: NextRequest) {
         const routedToLaw = !outOfScope && belowThreshold;
 
         let lawContext: string | undefined;
-        let lawSources: SourceChunk[] = [];
+        // 통합: 검색(searchAiLaw)은 LLM 근거(lawContext) + 인용 검증 재사용(retrieved)
+        // 전용. 참조문서 표시는 더 이상 검색 결과를 직접 쓰지 않고, 답변이 실제 인용·검증한
+        // 조문(citationSources)만 단일 소스로 쓴다 — "표시≠사용"·노이즈 폴백 제거.
+        let lawRetrieved: RetrievedLaws | undefined;
+        let lawRefs: { name: string; lawId: string }[] = [];
         let precedentSources: SourceChunk[] = [];
         if (routedToLaw) {
           // 법령과 판례를 동시 조회 (둘 다 법제처 — 병렬로 응답 전 지연 최소화).
@@ -221,18 +225,9 @@ export async function POST(req: NextRequest) {
             searchDecisions(query, "prec", 2),
           ]);
           if (law.context) lawContext = law.context;
-          // 법령을 참조문서로 변환 — 각 법령에 대응하는 발췌 조문(articles[i])과
-          // 관련도(score)를 함께 싣는다. aiSearch 는 refs[i] ↔ articles[i] 정렬.
-          lawSources = law.refs.map((r, i) => ({
-            id: -(i + 1),
-            title: r.name,
-            source_ref: `법제처 국가법령정보 · 법령ID ${r.lawId}`,
-            content:
-              law.articles[i] ??
-              `${r.name}${r.promulgated ? `\n공포일 ${r.promulgated}` : ""}${r.ministry ? ` · 소관 ${r.ministry}` : ""}`,
-            metadata: { kind: "law", lawId: r.lawId },
-            score: r.score ?? 0,
-          }));
+          lawRetrieved = law.retrieved;
+          // 검색이 찾은 법령은 라우팅 표시(routing.laws)에만 쓴다(참조 카드 아님).
+          lawRefs = law.refs.map((r) => ({ name: r.name, lawId: r.lawId }));
 
           // 상위 판례 본문을 회수해 참조문서 + 컨텍스트로 보강 (best-effort).
           if (precRefs.length > 0) {
@@ -261,10 +256,6 @@ export async function POST(req: NextRequest) {
             }
           }
         }
-        const lawRefs = lawSources.map((s) => ({
-          name: s.title ?? "",
-          lawId: String((s.metadata as { lawId?: string }).lawId ?? ""),
-        }));
 
         console.log(
           `[chat] route=${outOfScope ? "out_of_scope" : routedToLaw ? "law" : "regulation"} maxScore=${maxScore.toFixed(3)} ` +
@@ -292,18 +283,17 @@ export async function POST(req: NextRequest) {
         let citationCheck: CitationCheck | null = null;
         if (routedToLaw) {
           try {
-            citationCheck = await verifyCitations(answerText);
+            // 검색이 이미 회수한 조문(lawRetrieved)을 재사용 — 인용이 검색 결과에 있으면
+            // 법제처 재조회 없이 검증, 없을 때만 법제처 조회(누락 보강·환각 판정).
+            citationCheck = await verifyCitations(answerText, lawRetrieved);
           } catch (err) {
             console.error("[chat] citation verify failed:", (err as Error).message);
           }
         }
 
-        // 인용 조문의 표시 관련도는 검색(lawSources)에서 끌어온다. 검색에 없던(모델이
-        // 기억으로 인용한) 조문은 0 — "검증된 실존"과 "검색 근거"를 구분(과표기 방지, M11).
-        const lawScoreById = new Map(
-          lawSources.map((s) => [String((s.metadata as { lawId?: string }).lawId ?? ""), s.score]),
-        );
         // 답변이 인용했고 법제처에 실존이 확인된 조문을, 그 본문과 함께 참조 카드로.
+        // 참조 카드는 이 단일 소스만 쓴다 — 검색 후보(노이즈)로의 폴백 없음. 관련도(score)는
+        // 법령 카드 UI에 미표시(내부 정렬용 0)라 별도 점수 매핑을 두지 않는다.
         const citationSources: SourceChunk[] = (citationCheck?.verdicts ?? [])
           .filter((v) => v.status === "verified" && v.body)
           .map((v, i) => ({
@@ -312,18 +302,16 @@ export async function POST(req: NextRequest) {
             source_ref: `법제처 국가법령정보 · 법령ID ${v.lawId ?? ""}`,
             content: formatArticle(v.article, v.articleTitle ?? "", v.body!),
             metadata: { kind: "law", lawId: v.lawId, article: v.article, cited: true },
-            score: lawScoreById.get(String(v.lawId ?? "")) ?? 0,
+            score: 0,
           }));
 
-        // 7) 라우팅·참조문서 전송. 법령 분기면 인용 조문(있으면)을, 없으면 검색 조문을,
-        //    규정 분기면 규정 청크를 참조문서로 표시.
-        //    범위 밖이면 참조문서를 일절 표시하지 않는다(빈 배열).
+        // 7) 라우팅·참조문서 전송. 법령 분기는 답변이 인용·검증한 조문만 표시(검색 후보로
+        //    폴백하지 않음 — 인용이 0건이면 판례만, 그것도 없으면 빈 표시). 규정 분기면
+        //    규정 청크를. 범위 밖이면 참조문서를 일절 표시하지 않는다(빈 배열).
         const displayedSources = outOfScope
           ? []
           : routedToLaw
-            ? citationSources.length > 0
-              ? [...citationSources, ...precedentSources]
-              : [...lawSources, ...precedentSources]
+            ? [...citationSources, ...precedentSources]
             : sources;
         if (!outOfScope) {
           send(

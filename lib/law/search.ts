@@ -36,7 +36,19 @@ export type LawLookup = {
   refs: LawRef[];
   context: string; // LLM <context> 주입용 텍스트 (법령명 + 발췌 조문)
   articles: string[]; // 1위 법령의 발췌 조문 (참조문서 패널 표시용)
+  retrieved?: RetrievedLaws; // 인용 검증 재사용용 구조화 조문 (aiSearch 가 이미 회수한 본문)
 };
+
+// 검색이 이미 회수한 조문을 인용 검증이 재사용하도록 노출하는 구조화 맵.
+// aiSearch 응답은 조문 본문을 내장하므로(법제처 공식 데이터), 답변이 인용한 (법, 조문)이
+// 여기 있으면 verify 가 법제처를 다시 조회할 필요가 없다(2차 라운드트립 제거).
+export type RetrievedLaws = {
+  nameToId: Map<string, string>; // 정규화 법령명 → 법령ID
+  articles: Map<string, Map<string, { title: string; body: string }>>; // 법령ID → 조문키("제258조") → {제목, 본문}
+};
+
+// 법령명 정규화 — 공백 제거. verify 의 인용 법령명과 검색 법령명을 같은 잣대로 비교.
+const normLawName = (s: string) => s.replace(/\s+/g, "");
 
 const LAW_NAME_RE =
   /[가-힣A-Za-z0-9·()]+(?:법률|시행령|시행규칙|법|규정|규칙|조례)/g;
@@ -401,7 +413,12 @@ export async function searchAiLaw(
   display = 50,
   maxLaws = 3,
   articlesPerLaw = 3,
-  minScore = 0.05,
+  // 노출 게이트는 내부 규정과 동일한 잣대(RELEVANCE_THRESHOLD)를 쓴다. 같은 Cohere
+  // 점수인데 규정은 0.33 이상이라야 "관련 있음"이고 법령은 0.05만 넘으면 권위 근거로
+  // 주입되던 비대칭을 제거 — 최상위 법조차 기준 미만이면 약한 노이즈 법(예: 채권
+  // 우선순위 질의의 0.27짜리 보증기금법)이 답변에 박혀 환각을 유발했다. 기준 미만이면
+  // 빈 결과 → route 가 "확인된 자료 없음" 정직 폴백으로 처리.
+  minScore = env.RELEVANCE_THRESHOLD,
 ): Promise<LawLookup> {
   const oc = env.LAW_GO_KR_API_KEY;
   if (!oc || !query.trim()) return { refs: [], context: "", articles: [] };
@@ -442,6 +459,8 @@ export async function searchAiLaw(
 
   type Group = { ref: LawRef; arts: string[] };
   const groups = new Map<string, Group>();
+  // 인용 검증 재사용용 구조화 맵 — 표시(top-3×articlesPerLaw)에 든 조문을 본문째 적재.
+  const retrieved: RetrievedLaws = { nameToId: new Map(), articles: new Map() };
   for (const { hit: h, score } of adjusted) {
     let g = groups.get(h.lawId);
     if (!g) {
@@ -456,13 +475,16 @@ export async function searchAiLaw(
         arts: [],
       };
       groups.set(h.lawId, g);
+      retrieved.nameToId.set(normLawName(h.name), h.lawId);
+      retrieved.articles.set(h.lawId, new Map());
     }
     if (g.arts.length >= articlesPerLaw) continue;
-    const label = h.articleTitle
-      ? `${fmtArticleNo(h.articleNo, h.articleBranch)}(${h.articleTitle})`
-      : fmtArticleNo(h.articleNo, h.articleBranch);
+    const articleKey = fmtArticleNo(h.articleNo, h.articleBranch);
+    const label = h.articleTitle ? `${articleKey}(${h.articleTitle})` : articleKey;
     // 조문 제목은 볼드 헤더로, 본문은 항별 줄바꿈으로 — 패널에서 규정 문서처럼 보이게.
     g.arts.push(`**${label}**\n\n${clipText(cleanArticleBody(h.body), 500)}`);
+    // verify 재사용용 원본(raw body) 저장 — formatArticle 이 자체적으로 cleanArticleBody 처리.
+    retrieved.articles.get(h.lawId)!.set(articleKey, { title: h.articleTitle, body: h.body });
   }
 
   const refs: LawRef[] = [];
@@ -485,5 +507,5 @@ export async function searchAiLaw(
         )}%)\n${articles[i]}`,
     )
     .join("\n\n");
-  return { refs, context, articles };
+  return { refs, context, articles, retrieved };
 }
