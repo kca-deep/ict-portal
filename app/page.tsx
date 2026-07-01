@@ -332,7 +332,7 @@ export default function Home() {
   );
 
   return (
-    <main className="flex h-screen bg-background">
+    <main className="flex h-screen bg-background overflow-hidden">
       <div className="flex-1 flex flex-col h-full min-w-0">
         {/* Header — 하단 구분선을 전체 가로 폭으로 표시, 내용만 채팅 컬럼에 정렬 */}
         <header className="shrink-0 border-b-2 border-b-primary/25 bg-background/80 backdrop-blur-sm">
@@ -425,7 +425,10 @@ export default function Home() {
               >
                 무엇을 도와드릴까요?
               </p>
-              <div className="w-full max-w-[700px]">{composer}</div>
+              <div className="w-full max-w-[700px] relative">
+                <div className="composer-cloud" aria-hidden />
+                <div className="relative">{composer}</div>
+              </div>
             </div>
           </div>
         ) : (

@@ -111,3 +111,33 @@
     @apply bg-background text-foreground font-sans;
   }
 }
+
+/* 첫화면 입력창 뒤 소프트 블루 클라우드(헤일로) — 입력창을 완전히 감싸며 은은히 보임.
+   Gemini 화이트모드 참고. 색은 로고/버블 블루 계열. 대화 시작 전 첫화면에만 표시. */
+.composer-cloud {
+  position: absolute;
+  z-index: 0;
+  /* 세로는 고정, 가로는 컨테이너 폭 비례(%)로 → 모바일에서 화면 밖으로 안 넘침.
+     넘치는 부분은 부모(.overflow-hidden)에서 클리핑. */
+  inset: -110px -24%;
+  border-radius: 999px;
+  pointer-events: none;
+  background: radial-gradient(
+    64% 128% at 50% 50%,
+    oklch(0.72 0.11 250 / 0.52) 0%,
+    oklch(0.70 0.12 258 / 0.34) 38%,
+    oklch(0.74 0.09 240 / 0.16) 60%,
+    transparent 74%
+  );
+  filter: blur(44px);
+}
+
+.dark .composer-cloud {
+  background: radial-gradient(
+    64% 128% at 50% 50%,
+    oklch(0.55 0.14 258 / 0.52) 0%,
+    oklch(0.50 0.13 262 / 0.34) 38%,
+    oklch(0.52 0.11 250 / 0.16) 60%,
+    transparent 74%
+  );
+}
