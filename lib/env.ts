@@ -48,6 +48,26 @@ const envSchema = z.object({
 
   CRAWLER_USER_AGENT: z.string().default("PIMS-Crawler/1.0"),
   CRAWLER_TIMEOUT_MS: z.coerce.number().default(10000),
+}).superRefine((val, ctx) => {
+  // 부팅 가드: 로컬 개발은 유연하게 두되, 프로덕션에선 핵심 키가 비어 있으면
+  // 부팅을 실패시킨다. 런타임 첫 호출에서야 터지는 사고(원인 추적난)를 막는다.
+  if (process.env.NODE_ENV !== "production") return;
+  const required = [
+    "OPENAI_API_KEY", // 임베딩
+    "ANTHROPIC_API_KEY", // 답변 LLM
+    "COHERE_API_KEY", // 재정렬
+    "LAW_GO_KR_API_KEY", // 법제처 조회
+    "ADMIN_PASSWORD", // 관리자 페이지 보호
+  ] as const;
+  for (const key of required) {
+    if (!val[key]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: `${key} 는 프로덕션에서 필수입니다.`,
+      });
+    }
+  }
 });
 
 export const env = envSchema.parse(process.env);

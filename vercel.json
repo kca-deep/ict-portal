@@ -8,14 +8,6 @@
     "app/api/ingest/route.ts": {
       "maxDuration": 300,
       "memory": 1024
-    },
-    "app/api/[transport]/route.ts": {
-      "maxDuration": 60,
-      "memory": 512
-    },
-    "app/api/search/route.ts": {
-      "maxDuration": 30,
-      "memory": 512
     }
   }
 }
