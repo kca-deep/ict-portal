@@ -134,6 +134,9 @@ export type QueryLogStats = {
   total: number;
   byRoute: { regulation: number; law: number; out_of_scope: number; unknown: number };
   hallucinationCount: number;
+  citationCount: number; // 인용 총 개수(검증 대상)
+  citationVerifiedCount: number; // 그중 인용 검증 통과 개수
+  errorCount: number; // error_code 가 있는 요청 수
   avgTotalMs: number | null;
   avgTtftMs: number | null;
   tokensIn: number;
@@ -149,7 +152,9 @@ export async function queryLogStats(
 ): Promise<QueryLogStats> {
   let q = getSupabaseAdmin()
     .from("query_log")
-    .select("route, has_hallucination, total_ms, ttft_ms, tokens_in, tokens_out")
+    .select(
+      "route, has_hallucination, total_ms, ttft_ms, tokens_in, tokens_out, citation_count, citation_verified_count, error_code",
+    )
     .order("created_at", { ascending: false })
     .limit(STATS_ROW_CAP);
 
@@ -168,10 +173,16 @@ export async function queryLogStats(
     ttft_ms: number | null;
     tokens_in: number | null;
     tokens_out: number | null;
+    citation_count: number | null;
+    citation_verified_count: number | null;
+    error_code: string | null;
   }>;
 
   const byRoute = { regulation: 0, law: 0, out_of_scope: 0, unknown: 0 };
   let hallucinationCount = 0;
+  let citationCount = 0;
+  let citationVerifiedCount = 0;
+  let errorCount = 0;
   let totalMsSum = 0;
   let totalMsN = 0;
   let ttftMsSum = 0;
@@ -186,6 +197,9 @@ export async function queryLogStats(
       byRoute.unknown += 1;
     }
     if (r.has_hallucination) hallucinationCount += 1;
+    if (r.error_code) errorCount += 1;
+    citationCount += r.citation_count ?? 0;
+    citationVerifiedCount += r.citation_verified_count ?? 0;
     if (typeof r.total_ms === "number") {
       totalMsSum += r.total_ms;
       totalMsN += 1;
@@ -202,6 +216,9 @@ export async function queryLogStats(
     total: rows.length,
     byRoute,
     hallucinationCount,
+    citationCount,
+    citationVerifiedCount,
+    errorCount,
     avgTotalMs: totalMsN ? Math.round(totalMsSum / totalMsN) : null,
     avgTtftMs: ttftMsN ? Math.round(ttftMsSum / ttftMsN) : null,
     tokensIn,
