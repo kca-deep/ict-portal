@@ -20,6 +20,10 @@ const envSchema = z.object({
   // ingest 관리자 시크릿 — 미설정 시 /api/ingest 는 항상 403(외부 노출 금지).
   INGEST_SECRET: z.string().optional(),
 
+  // 관리자 페이지(/admin) 보호 비밀번호. 로그인이 없어 이 단일 비밀번호 + 서명
+  // httpOnly 쿠키로 관리자 화면을 보호한다. 미설정 시 /admin 은 항상 차단된다.
+  ADMIN_PASSWORD: z.string().optional(),
+
   // 입력 캡 — 한 요청의 대화 턴 수·메시지 글자 수 상한(비용/남용 방지).
   MAX_TURNS: z.coerce.number().default(30),
   MAX_CONTENT_CHARS: z.coerce.number().default(8000),
