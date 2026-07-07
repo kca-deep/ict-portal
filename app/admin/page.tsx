@@ -26,8 +26,6 @@ const ROUTE_META: Record<
 };
 
 // ── 포매터 ──────────────────────────────────────────────────────────────────
-const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
-
 function first(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
 }
@@ -134,68 +132,77 @@ export default async function AdminPage({
           <span className="text-xs text-muted-foreground/70">읽기 전용 · service_role 서버 조회</span>
         </header>
 
-        {/* 계기판: 히어로 + 분포 바 + KPI 스트립 */}
+        {/* 계기판: 사용량·이용자·이용률 + 추이 차트 + 분기 도넛 + 품질 스트립 */}
         <section className="mt-5 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-          <div className="grid gap-8 p-6 md:grid-cols-[minmax(0,1fr)_1.4fr] md:gap-10">
-            {/* 히어로: 질의 수 */}
-            <div className="flex flex-col justify-between gap-4 md:border-r md:border-border md:pr-10">
-              <div>
+          <div className="grid lg:grid-cols-[1.7fr_1fr]">
+            {/* 좌: 사용량 지표 + 추이 차트 */}
+            <div className="p-6 lg:border-r lg:border-border">
+              <div className="flex items-start justify-between gap-4">
                 <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                  질의 수
+                  사용량 추이
                 </div>
-                <div className="mt-1 font-serif text-[3.4rem] leading-[0.95] tracking-tight text-foreground tabular-nums">
-                  {stats.total.toLocaleString()}
+                <div className="flex gap-1 text-[13px]">
+                  {periods.map(([label, value]) => {
+                    const on = period === value || (!period && !value);
+                    return (
+                      <Link
+                        key={label}
+                        href={href(sp, { period: value, log: undefined })}
+                        className={`rounded-md px-2.5 py-1 transition ${
+                          on ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+                        }`}
+                      >
+                        {label}
+                      </Link>
+                    );
+                  })}
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground">{periodLabel}</div>
               </div>
-              <div className="flex gap-1 text-[13px]">
-                {periods.map(([label, value]) => {
-                  const on = period === value || (!period && !value);
-                  return (
-                    <Link
-                      key={label}
-                      href={href(sp, { period: value, log: undefined })}
-                      className={`rounded-md px-2.5 py-1 transition ${
-                        on
-                          ? "bg-primary text-primary-foreground"
-                          : "text-muted-foreground hover:bg-muted"
-                      }`}
-                    >
-                      {label}
-                    </Link>
-                  );
-                })}
+
+              <div className="mt-5 grid grid-cols-3 gap-4">
+                <HeroStat label="사용량" value={stats.total.toLocaleString()} sub={periodLabel} accent />
+                <HeroStat label="이용자 수" value={stats.distinctUsers.toLocaleString()} sub="고유 IP" />
+                <HeroStat
+                  label="이용률"
+                  value={stats.avgPerUser == null ? "–" : stats.avgPerUser.toFixed(1)}
+                  sub="평균 질문/인"
+                />
               </div>
+
+              <AreaChart series={stats.series} />
             </div>
 
-            {/* 분기 분포 */}
-            <div className="flex flex-col justify-center">
+            {/* 우: 분기 분포 도넛 */}
+            <div className="flex flex-col p-6">
               <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 분기 분포
               </div>
-              <DistributionBar stats={stats} />
-              <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1.5 text-[13px]">
-                {(["regulation", "law", "out_of_scope"] as const).map((k) => (
-                  <div key={k} className="flex items-center gap-2">
-                    <span
-                      className="inline-block h-2.5 w-2.5 rounded-sm"
-                      style={{ background: ROUTE_META[k].color }}
-                    />
-                    <span className="text-muted-foreground">{ROUTE_META[k].label}</span>
-                    <span className="font-mono tabular-nums text-foreground">
-                      {pct(stats.byRoute[k], stats.total)}
-                    </span>
-                    <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-                      {stats.byRoute[k].toLocaleString()}
-                    </span>
-                  </div>
-                ))}
+              <div className="mt-4 flex flex-1 items-center gap-6">
+                <Donut stats={stats} />
+                <div className="flex flex-col gap-2.5 text-[13px]">
+                  {(["regulation", "law", "out_of_scope"] as const).map((k) => (
+                    <div key={k} className="flex items-center gap-2">
+                      <span
+                        className="inline-block h-2.5 w-2.5 rounded-sm"
+                        style={{ background: ROUTE_META[k].color }}
+                      />
+                      <span className="w-12 text-muted-foreground">{ROUTE_META[k].label}</span>
+                      <span className="font-mono tabular-nums text-foreground">
+                        {pct(stats.byRoute[k], stats.total)}
+                      </span>
+                      <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
+                        {stats.byRoute[k].toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
 
-          {/* KPI 스트립 */}
-          <div className="grid grid-cols-2 border-t border-border bg-muted/40 sm:grid-cols-5">
+          {/* 품질 스트립: 평균 응답시간 → 환각률 → 인용 검증률 → 오류율 */}
+          <div className="grid grid-cols-2 border-t border-border bg-muted/40 sm:grid-cols-4">
+            <Kpi label="평균 응답시간" value={fmtDur(stats.avgTotalMs)} note={`첫토큰 ${fmtDur(stats.avgTtftMs)}`} />
             <Kpi
               label="환각률"
               value={pct(stats.hallucinationCount, stats.total)}
@@ -212,12 +219,6 @@ export default async function AdminPage({
               value={pct(stats.errorCount, stats.total)}
               note={`${stats.errorCount.toLocaleString()}건`}
               critical={stats.errorCount > 0}
-            />
-            <Kpi label="평균 응답" value={fmtDur(stats.avgTotalMs)} note={`첫토큰 ${fmtDur(stats.avgTtftMs)}`} />
-            <Kpi
-              label="토큰"
-              value={compact.format(stats.tokensIn + stats.tokensOut)}
-              note={`in ${compact.format(stats.tokensIn)} · out ${compact.format(stats.tokensOut)}`}
             />
           </div>
         </section>
@@ -351,20 +352,125 @@ export default async function AdminPage({
 }
 
 // ── 서브 컴포넌트 ────────────────────────────────────────────────────────────
-function DistributionBar({ stats }: { stats: QueryLogStats }) {
-  const segments = (["regulation", "law", "out_of_scope"] as const)
-    .map((k) => ({ w: pctNum(stats.byRoute[k], stats.total), color: ROUTE_META[k].color }))
-    .filter((s) => s.w > 0);
+function HeroStat({
+  label,
+  value,
+  sub,
+  accent,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  accent?: boolean;
+}) {
   return (
-    <div className="mt-3 flex h-3 w-full overflow-hidden rounded-full bg-muted">
-      {stats.total === 0 ? null : (
-        <div className="flex h-full w-full gap-[2px]">
-          {segments.map((s, i) => (
-            <div key={i} style={{ width: `${s.w}%`, background: s.color }} className="h-full first:rounded-l-full last:rounded-r-full" />
-          ))}
+    <div>
+      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div
+        className={`mt-1.5 font-serif text-[2.15rem] leading-none tabular-nums ${
+          accent ? "text-primary" : "text-foreground"
+        }`}
+      >
+        {value}
+      </div>
+      <div className="mt-1.5 text-[11px] text-muted-foreground/80">{sub}</div>
+    </div>
+  );
+}
+
+// 사용량 추이 SVG 영역차트. 서버에서 path 를 직접 계산해 렌더(클라이언트 JS 없음).
+// 폭은 100%로 늘리되(preserveAspectRatio=none) 선은 non-scaling-stroke 로 또렷하게.
+function AreaChart({ series }: { series: { label: string; count: number }[] }) {
+  const n = series.length;
+  const W = 600;
+  const H = 128;
+  const pad = 8;
+  const max = Math.max(1, ...series.map((s) => s.count));
+  const x = (i: number) => (n <= 1 ? W / 2 : pad + (i / (n - 1)) * (W - pad * 2));
+  const y = (c: number) => H - pad - (c / max) * (H - pad * 2);
+  const line = series.map((s, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(s.count).toFixed(1)}`).join(" ");
+  const area =
+    n === 0
+      ? ""
+      : `M${x(0).toFixed(1)},${H} ` +
+        series.map((s, i) => `L${x(i).toFixed(1)},${y(s.count).toFixed(1)}`).join(" ") +
+        ` L${x(n - 1).toFixed(1)},${H} Z`;
+  const labels = n === 0 ? [] : [series[0], series[Math.floor((n - 1) / 2)], series[n - 1]];
+  return (
+    <div className="mt-5">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-28 w-full" role="img" aria-label="사용량 추이">
+        <defs>
+          <linearGradient id="usageFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.20" />
+            <stop offset="100%" stopColor="var(--primary)" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        {n > 0 && <path d={area} fill="url(#usageFill)" />}
+        {n > 0 && (
+          <path
+            d={line}
+            fill="none"
+            stroke="var(--primary)"
+            strokeWidth={2}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+      </svg>
+      {labels.length > 0 && (
+        <div className="mt-1.5 flex justify-between font-mono text-[10px] tabular-nums text-muted-foreground/60">
+          <span>{labels[0].label}</span>
+          <span>{labels[1].label}</span>
+          <span>{labels[2].label}</span>
         </div>
       )}
     </div>
+  );
+}
+
+// 분기 분포 도넛(SVG). stroke-dasharray 로 세 분기를 그린다(출처색).
+function Donut({ stats }: { stats: QueryLogStats }) {
+  const size = 108;
+  const c = size / 2;
+  const r = 42;
+  const sw = 13;
+  const C = 2 * Math.PI * r;
+  let acc = 0;
+  const arcs = (["regulation", "law", "out_of_scope"] as const)
+    .map((k) => {
+      const frac = stats.total ? stats.byRoute[k] / stats.total : 0;
+      const len = frac * C;
+      const off = -acc;
+      acc += len;
+      return { k, len, off, color: ROUTE_META[k].color };
+    })
+    .filter((a) => a.len > 0);
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0" role="img" aria-label="분기 분포">
+      <circle cx={c} cy={c} r={r} fill="none" stroke="var(--muted)" strokeWidth={sw} />
+      <g transform={`rotate(-90 ${c} ${c})`}>
+        {arcs.map((a) => (
+          <circle
+            key={a.k}
+            cx={c}
+            cy={c}
+            r={r}
+            fill="none"
+            stroke={a.color}
+            strokeWidth={sw}
+            strokeDasharray={`${a.len.toFixed(2)} ${(C - a.len).toFixed(2)}`}
+            strokeDashoffset={a.off.toFixed(2)}
+          />
+        ))}
+      </g>
+      <text x={c} y={c - 1} textAnchor="middle" className="fill-foreground font-serif" style={{ fontSize: 22 }}>
+        {stats.total.toLocaleString()}
+      </text>
+      <text x={c} y={c + 15} textAnchor="middle" className="fill-muted-foreground" style={{ fontSize: 10 }}>
+        질의
+      </text>
+    </svg>
   );
 }
 

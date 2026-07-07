@@ -131,7 +131,9 @@ export async function getQueryLog(id: number): Promise<QueryLogDetail | null> {
 }
 
 export type QueryLogStats = {
-  total: number;
+  total: number; // 사용량(질의 수)
+  distinctUsers: number; // 이용자 수 = 고유 IP 수(로그인 없음)
+  avgPerUser: number | null; // 이용률 = 총 질의 / 고유 이용자
   byRoute: { regulation: number; law: number; out_of_scope: number; unknown: number };
   hallucinationCount: number;
   citationCount: number; // 인용 총 개수(검증 대상)
@@ -139,9 +141,39 @@ export type QueryLogStats = {
   errorCount: number; // error_code 가 있는 요청 수
   avgTotalMs: number | null;
   avgTtftMs: number | null;
-  tokensIn: number;
-  tokensOut: number;
+  series: { label: string; count: number }[]; // 사용량 추이(시간/일 버킷)
 };
+
+// created_at 목록을 사용량 추이 버킷으로 접는다. 조회 창 기준으로 24h 이내면 시간별,
+// 그 이상이면 일별(최근 30일 상한). 서버에서 그대로 SVG 차트로 렌더한다.
+function buildUsageSeries(
+  times: number[],
+  since: string | undefined,
+): { label: string; count: number }[] {
+  const now = Date.now();
+  let start = since ? new Date(since).getTime() : times.length ? Math.min(...times) : now - 24 * 3600 * 1000;
+  const hourly = now - start <= 2 * 24 * 3600 * 1000;
+  const bucketMs = hourly ? 3600 * 1000 : 24 * 3600 * 1000;
+  if (!hourly) {
+    const maxSpan = 30 * 24 * 3600 * 1000; // 일별 버킷 개수 상한
+    if (now - start > maxSpan) start = now - maxSpan;
+  }
+  const startAligned = Math.floor(start / bucketMs) * bucketMs;
+  const buckets: { t: number; count: number }[] = [];
+  for (let t = startAligned; t <= now; t += bucketMs) buckets.push({ t, count: 0 });
+  if (buckets.length === 0) buckets.push({ t: startAligned, count: 0 });
+  for (const time of times) {
+    const idx = Math.floor((time - startAligned) / bucketMs);
+    if (idx >= 0 && idx < buckets.length) buckets[idx].count += 1;
+  }
+  return buckets.map((b) => {
+    const d = new Date(b.t);
+    return {
+      label: hourly ? `${d.getHours()}시` : `${d.getMonth() + 1}/${d.getDate()}`,
+      count: b.count,
+    };
+  });
+}
 
 // 집계 대상 상한 — PoC 규모(소량)라 행을 가져와 JS 에서 집계한다. 창이 커지면 RPC 로 승격.
 const STATS_ROW_CAP = 5000;
@@ -153,7 +185,7 @@ export async function queryLogStats(
   let q = getSupabaseAdmin()
     .from("query_log")
     .select(
-      "route, has_hallucination, total_ms, ttft_ms, tokens_in, tokens_out, citation_count, citation_verified_count, error_code",
+      "ip, created_at, route, has_hallucination, total_ms, ttft_ms, citation_count, citation_verified_count, error_code",
     )
     .order("created_at", { ascending: false })
     .limit(STATS_ROW_CAP);
@@ -167,18 +199,20 @@ export async function queryLogStats(
   if (error) throw new Error(`[query-log] stats failed: ${error.message}`);
 
   const rows = (data ?? []) as unknown as Array<{
+    ip: string | null;
+    created_at: string;
     route: string | null;
     has_hallucination: boolean | null;
     total_ms: number | null;
     ttft_ms: number | null;
-    tokens_in: number | null;
-    tokens_out: number | null;
     citation_count: number | null;
     citation_verified_count: number | null;
     error_code: string | null;
   }>;
 
   const byRoute = { regulation: 0, law: 0, out_of_scope: 0, unknown: 0 };
+  const users = new Set<string>();
+  const times: number[] = [];
   let hallucinationCount = 0;
   let citationCount = 0;
   let citationVerifiedCount = 0;
@@ -187,10 +221,10 @@ export async function queryLogStats(
   let totalMsN = 0;
   let ttftMsSum = 0;
   let ttftMsN = 0;
-  let tokensIn = 0;
-  let tokensOut = 0;
 
   for (const r of rows) {
+    if (r.ip) users.add(r.ip);
+    times.push(new Date(r.created_at).getTime());
     if (r.route === "regulation" || r.route === "law" || r.route === "out_of_scope") {
       byRoute[r.route] += 1;
     } else {
@@ -208,12 +242,15 @@ export async function queryLogStats(
       ttftMsSum += r.ttft_ms;
       ttftMsN += 1;
     }
-    tokensIn += r.tokens_in ?? 0;
-    tokensOut += r.tokens_out ?? 0;
   }
 
+  const total = rows.length;
+  const distinctUsers = users.size;
+
   return {
-    total: rows.length,
+    total,
+    distinctUsers,
+    avgPerUser: distinctUsers ? Math.round((total / distinctUsers) * 10) / 10 : null,
     byRoute,
     hallucinationCount,
     citationCount,
@@ -221,7 +258,6 @@ export async function queryLogStats(
     errorCount,
     avgTotalMs: totalMsN ? Math.round(totalMsSum / totalMsN) : null,
     avgTtftMs: ttftMsN ? Math.round(ttftMsSum / ttftMsN) : null,
-    tokensIn,
-    tokensOut,
+    series: buildUsageSeries(times, filter.since),
   };
 }
