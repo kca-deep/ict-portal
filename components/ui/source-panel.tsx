@@ -25,16 +25,12 @@ export function kindOf(source: SourceChunk): SourceKind {
   return "regulation";
 }
 
-// 출처 종류별 뱃지 (📘 내부규정=블루 / ⚖️ 법령·판례=앰버). 공모공고(8월)=그린 추가 예정.
-// 패널은 웜 라이트 면이라 뱃지는 흰 칩(bg-card)으로 대비를 주고, 종류 색은
-// 패널 좌측 보더(borderClass)가 담당한다 — 색약 안전한 의미 구분.
-const BADGE: Record<
-  SourceKind,
-  { icon: string; label: string; borderClass: string }
-> = {
-  regulation: { icon: "📘", label: "내부규정", borderClass: "border-l-badge-regulation" },
-  law: { icon: "⚖️", label: "법령", borderClass: "border-l-badge-law" },
-  precedent: { icon: "⚖️", label: "판례", borderClass: "border-l-badge-law" },
+// 출처 종류별 뱃지 (📘 내부규정 / ⚖️ 법령·판례). 공모공고(8월) 추가 예정.
+// 패널은 웜 라이트 면이라 뱃지는 흰 칩(bg-card)으로 대비를 준다.
+const BADGE: Record<SourceKind, { icon: string; label: string }> = {
+  regulation: { icon: "📘", label: "내부규정" },
+  law: { icon: "⚖️", label: "법령" },
+  precedent: { icon: "⚖️", label: "판례" },
 };
 
 /**
@@ -77,10 +73,10 @@ export function SourcePanel({
           md:static md:inset-auto md:z-auto md:h-full md:max-h-none md:w-2/5 md:shrink-0 md:p-5 md:pl-2.5
         "
       >
-        {/* 웜 라이트 집중 패널 — 좌측 보더가 출처 종류 색(블루/앰버). 답변 말풍선과 같은
-            웜 톤(accent)으로 맞춰 어두운 패널의 이질감을 없앤다. 내부 마크다운(표·코드)은
-            기본 라이트 토큰으로 렌더되어 별도 스코프 오버라이드가 필요 없다. */}
-        <div className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-border border-l-4 ${badge.borderClass} bg-accent text-accent-foreground shadow-[7px_7px_8px_-1px_rgba(0,0,0,0.25)] ring-1 ring-black/5`}>
+        {/* 웜 라이트 집중 패널 — 답변 말풍선과 같은 웜 톤(accent)으로 맞춰 어두운 패널의
+            이질감을 없앤다. 내부 마크다운(표·코드)은 기본 라이트 토큰으로 렌더되어 별도
+            스코프 오버라이드가 필요 없다. */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-border bg-accent text-accent-foreground shadow-[7px_7px_8px_-1px_rgba(0,0,0,0.25)] ring-1 ring-black/5">
           {/* 헤더: 뱃지(종류·관련도) · 제목 · 닫기 */}
           <div className="flex items-start gap-3 border-b border-border px-8 py-5 shrink-0">
             {/* 종류 + 관련도(내부 규정만)를 한 뱃지 카드 안에 줄바꿈으로 표시 */}
