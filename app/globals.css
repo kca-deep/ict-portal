@@ -45,7 +45,7 @@
   --sidebar-accent-foreground: oklch(0.4732 0.1247 264.5419);
   --sidebar-border: oklch(0.9276 0.0058 264.5313);
   --sidebar-ring: oklch(0.7686 0.1647 264.5419);
-  --font-sans: Inter, sans-serif;
+  --font-sans: var(--font-ibm-plex-kr), "Pretendard", system-ui, sans-serif;
   --font-serif: Source Serif 4, serif;
   --font-mono: JetBrains Mono, monospace;
   --radius: 0.5rem;
