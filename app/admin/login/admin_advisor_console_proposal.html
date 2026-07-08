@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PIMS · 규정·법령 어드바이저 운영 콘솔</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+/>
+<style>
+  :root {
+    --paper:#eef1f4; --surface:#ffffff; --elevated:#f7f9fb; --input:#f1f4f7; --hover:#f2f6f9;
+    --border:#dde3ea; --border-bright:#c6d0da;
+    --text:#0f1922; --text-2:#53616e; --text-muted:#7d8b98; --text-dim:#a9b4bf;
+    --cyan:#0a94ab; --cyan-soft:#077f94; --cyan-dim:rgba(10,148,171,0.10); --cyan-line:rgba(10,148,171,0.40);
+    --critical:#d93a3a; --critical-dim:rgba(217,58,58,0.10);
+    --warn:#b7791f; --warn-dim:rgba(183,121,31,0.12);
+    --ok:#12925a; --ok-dim:rgba(18,146,90,0.12);
+    --violet:#4f57d8; --violet-dim:rgba(79,87,216,0.11);
+    --shadow-sm:0 1px 2px rgba(15,25,34,0.05), 0 1px 1px rgba(15,25,34,0.03);
+    --shadow-md:0 4px 14px -6px rgba(15,25,34,0.14), 0 1px 3px rgba(15,25,34,0.05);
+    --sans:"IBM Plex Sans KR",-apple-system,BlinkMacSystemFont,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,monospace;
+  }
+  *,*::before,*::after{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--paper);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+  body{min-height:100vh;position:relative;overflow-x:hidden;background-image:radial-gradient(circle at 8% 0%,rgba(10,148,171,0.055),transparent 34%),radial-gradient(circle at 94% 100%,rgba(183,121,31,0.04),transparent 42%);}
+  body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;background-image:linear-gradient(rgba(15,25,34,0.028) 1px,transparent 1px),linear-gradient(90deg,rgba(15,25,34,0.028) 1px,transparent 1px);background-size:52px 52px;}
+  .app{position:relative;z-index:1;max-width:1460px;margin:0 auto;padding:0 32px 64px;}
+
+  /* command bar */
+  .topbar{display:grid;grid-template-columns:auto 1fr auto;gap:44px;align-items:center;padding:22px 0 24px;border-bottom:1px solid var(--border);margin-bottom:30px;}
+  .brand{display:flex;gap:15px;align-items:center;}
+  .brand-mark{width:44px;height:44px;flex-shrink:0;border-radius:12px;background:linear-gradient(140deg,var(--cyan),var(--cyan-soft));display:grid;place-items:center;color:#fff;font-weight:700;font-size:18px;letter-spacing:-0.02em;box-shadow:0 3px 11px -3px rgba(10,148,171,0.6);}
+  .brand-name{font-weight:700;font-size:20px;letter-spacing:-0.02em;color:var(--text);}
+  .brand-name .accent{color:var(--cyan-soft);}
+  .brand-sub{margin-top:5px;font-family:var(--mono);font-size:10px;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-muted);}
+  .topbar-nav{display:flex;gap:3px;justify-content:center;background:var(--surface);padding:4px;border:1px solid var(--border);border-radius:999px;width:fit-content;margin:0 auto;box-shadow:var(--shadow-sm);}
+  .topbar-nav a{padding:8px 17px;font-family:var(--mono);font-size:11px;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-2);text-decoration:none;border-radius:999px;transition:.15s;cursor:pointer;}
+  .topbar-nav a:hover{color:var(--text);background:var(--hover);}
+  .topbar-nav a.active{background:var(--cyan-dim);color:var(--cyan-soft);box-shadow:inset 0 0 0 1px rgba(10,148,171,0.35);}
+  .status-cluster{display:flex;gap:13px;align-items:center;}
+  .live-pill{display:inline-flex;align-items:center;gap:9px;padding:7px 13px 7px 11px;border:1px solid rgba(10,148,171,0.45);border-radius:999px;background:var(--cyan-dim);font-family:var(--mono);font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cyan-soft);}
+  .live-pill .dot{width:7px;height:7px;background:var(--cyan);border-radius:50%;box-shadow:0 0 0 3px rgba(10,148,171,0.15);animation:pulse 1.6s infinite ease-out;}
+  @keyframes pulse{0%,100%{transform:scale(1);opacity:1;}50%{transform:scale(1.2);opacity:.55;}}
+  .time{font-family:var(--mono);font-size:11px;color:var(--text-muted);}
+  .time strong{color:var(--text-2);font-weight:500;}
+
+  /* page head */
+  .page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px;gap:32px;}
+  .page-head h1{font-weight:600;font-size:clamp(28px,3.6vw,40px);line-height:1.05;letter-spacing:-0.02em;margin:0;color:var(--text);}
+  .page-head h1 em{font-style:normal;color:var(--cyan-soft);}
+  .page-head .sub{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin-top:12px;display:flex;gap:18px;flex-wrap:wrap;}
+  .page-head .sub span::before{content:"▸ ";color:var(--cyan);}
+  .head-actions{display:flex;gap:9px;align-items:center;}
+  .periods{display:flex;gap:4px;}
+  .periods a{font-family:var(--mono);font-size:12px;padding:7px 13px;border-radius:8px;color:var(--text-muted);text-decoration:none;cursor:pointer;transition:.15s;}
+  .periods a:hover{background:var(--hover);color:var(--text);}
+  .periods a.active{background:var(--cyan);color:#fff;}
+
+  /* KPI grid */
+  .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px;}
+  .kpi{position:relative;padding:20px 22px;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden;box-shadow:var(--shadow-sm);transition:transform .2s,box-shadow .2s,border-color .2s;}
+  .kpi:hover{border-color:var(--border-bright);transform:translateY(-1px);box-shadow:var(--shadow-md);}
+  .kpi::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--cyan-line),transparent);opacity:.6;}
+  .kpi.live::before{background:linear-gradient(90deg,transparent 0%,var(--cyan) 50%,transparent 100%);background-size:50% 100%;background-repeat:no-repeat;opacity:.9;animation:scan 2.4s linear infinite;}
+  @keyframes scan{from{background-position:-50% 0;}to{background-position:150% 0;}}
+  .kpi-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+  .kpi-label{font-family:var(--mono);font-size:10.5px;letter-spacing:0.09em;text-transform:uppercase;color:var(--text-muted);}
+  .kpi-idx{font-family:var(--mono);font-size:10px;color:var(--text-dim);}
+  .kpi-number{font-weight:600;font-size:42px;line-height:1;color:var(--text);letter-spacing:-0.02em;font-variant-numeric:tabular-nums;}
+  .kpi-number .unit{font-size:16px;color:var(--text-muted);margin-left:5px;font-weight:500;}
+  .kpi-meta{margin-top:12px;display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--text-2);}
+  .kpi-meta .delta{color:var(--ok);} .kpi-meta .delta.down{color:var(--critical);}
+  .kpi-spark{margin-top:14px;height:30px;width:100%;display:block;}
+
+  /* 품질 지표 스트립 (구 sources strip) */
+  .quality{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px;}
+  .q{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:15px 16px;display:flex;flex-direction:column;gap:9px;box-shadow:var(--shadow-sm);transition:border-color .15s,box-shadow .15s;}
+  .q:hover{border-color:var(--border-bright);box-shadow:var(--shadow-md);}
+  .q-head{display:flex;align-items:center;gap:8px;}
+  .q-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+  .q-dot.ok{background:var(--ok);box-shadow:0 0 0 3px rgba(18,146,90,0.14);}
+  .q-dot.warn{background:var(--warn);box-shadow:0 0 0 3px rgba(183,121,31,0.16);}
+  .q-dot.crit{background:var(--critical);box-shadow:0 0 0 3px rgba(217,58,58,0.16);}
+  .q-name{font-family:var(--mono);font-size:11.5px;font-weight:600;letter-spacing:0.02em;color:var(--text);}
+  .q-sub{font-size:10.5px;color:var(--text-muted);margin-top:-4px;}
+  .q-row{display:flex;justify-content:space-between;align-items:baseline;}
+  .q-value{font-weight:600;font-size:26px;letter-spacing:-0.02em;font-variant-numeric:tabular-nums;color:var(--text);}
+  .q-value.crit{color:var(--critical);} .q-value.warn{color:var(--warn);} .q-value.ok{color:var(--ok);}
+  .q-note{font-family:var(--mono);font-size:10px;color:var(--text-dim);}
+  .meter{margin-top:3px;height:6px;border-radius:999px;background:var(--input);overflow:hidden;}
+  .meter>span{display:block;height:100%;border-radius:999px;transform-origin:left;animation:grow .9s cubic-bezier(.22,1,.36,1) forwards;}
+  @keyframes grow{from{transform:scaleX(0);}to{transform:scaleX(1);}}
+
+  /* panels */
+  .split-row{display:grid;grid-template-columns:1.55fr 1fr;gap:14px;margin-bottom:14px;}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:6px;box-shadow:var(--shadow-sm);}
+  .panel-header{display:flex;align-items:center;justify-content:space-between;padding:17px 22px;border-bottom:1px solid var(--border);gap:16px;}
+  .panel-title{display:flex;align-items:baseline;gap:13px;}
+  .panel-title h2{font-weight:600;font-size:18px;letter-spacing:-0.01em;margin:0;color:var(--text);}
+  .panel-title h2 em{font-style:normal;color:var(--cyan-soft);}
+  .panel-title .meta{font-family:var(--mono);font-size:10.5px;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted);}
+  .tab-group{display:inline-flex;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:2px;}
+  .tab-group .tab{padding:5px 12px;font-family:var(--mono);font-size:10.5px;color:var(--text-muted);cursor:pointer;border-radius:4px;transition:.15s;}
+  .tab-group .tab:hover{color:var(--text-2);}
+  .tab-group .tab.active{background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm);}
+
+  /* chart */
+  .chart-body{padding:26px 22px 22px;}
+  .chart-svg{width:100%;height:210px;display:block;}
+  .chart-legend{display:flex;gap:18px;margin-top:14px;font-family:var(--mono);font-size:10.5px;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-muted);align-items:center;}
+  .legend-item{display:inline-flex;align-items:center;gap:7px;}
+  .legend-sw{width:10px;height:10px;border-radius:3px;}
+
+  /* donut */
+  .donut-body{padding:22px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;height:calc(100% - 55px);}
+  .legend-list{display:grid;grid-template-columns:auto auto;gap:11px 26px;font-size:13px;justify-content:center;}
+  .ll-row{display:flex;align-items:center;gap:10px;}
+  .ll-sw{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+  .ll-name{flex:1;color:var(--text-2);}
+  .ll-pct{font-family:var(--mono);font-weight:600;font-size:14px;color:var(--text);font-variant-numeric:tabular-nums;}
+  .ll-cnt{font-family:var(--mono);font-size:11px;color:var(--text-muted);width:22px;text-align:right;}
+  .donut-chart{position:relative;width:210px;height:186px;flex-shrink:0;filter:drop-shadow(0 4px 9px rgba(15,25,34,0.12));}
+  .donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;}
+  .donut-center .dc-num{font-family:var(--mono);font-size:26px;font-weight:600;color:var(--text);line-height:1;font-variant-numeric:tabular-nums;}
+  .donut-center .dc-lab{margin-top:3px;font-size:11px;color:var(--text-muted);}
+
+  /* table */
+  .filter-bar{display:flex;align-items:center;gap:8px;padding:14px 22px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
+  .filter-bar .search{flex:1;min-width:220px;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:9px 12px 9px 32px;color:var(--text);font-family:var(--sans);font-size:12.5px;outline:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237d8b98' stroke-width='2'><circle cx='11' cy='11' r='7'/><path d='m21 21-4.3-4.3'/></svg>");background-repeat:no-repeat;background-position:10px center;background-size:14px;}
+  .filter-bar .search:focus{border-color:var(--cyan);}
+  .chip{padding:6px 12px;font-family:var(--mono);font-size:10.5px;letter-spacing:0.04em;color:var(--text-2);background:var(--surface);border:1px solid var(--border);border-radius:999px;cursor:pointer;transition:.15s;user-select:none;}
+  .chip:hover{border-color:var(--text-muted);color:var(--text);}
+  .chip.active{background:var(--cyan-dim);border-color:rgba(10,148,171,0.45);color:var(--cyan-soft);}
+  .chip .count{margin-left:6px;color:var(--text-dim);}
+  .data-table{width:100%;border-collapse:collapse;}
+  .data-table thead th{text-align:left;padding:12px 16px;font-family:var(--mono);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-muted);font-weight:500;border-bottom:1px solid var(--border);background:var(--elevated);white-space:nowrap;}
+  .data-table tbody td{padding:12px 16px;border-bottom:1px solid var(--border);font-size:13px;color:var(--text-2);vertical-align:middle;}
+  .data-table tbody tr{transition:background .12s;cursor:pointer;}
+  .data-table tbody tr:hover{background:var(--hover);}
+  .c-time{font-family:var(--mono);font-size:11px;color:var(--text-muted);white-space:nowrap;}
+  .c-ip{font-family:var(--mono);font-size:11px;color:var(--text-muted);}
+  .c-q{color:var(--text);font-weight:500;max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .c-num{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;color:var(--text-2);font-size:11.5px;white-space:nowrap;}
+  .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-family:var(--mono);font-size:10.5px;font-weight:600;white-space:nowrap;}
+  .pill.reg{color:var(--cyan-soft);background:var(--cyan-dim);}
+  .pill.law{color:var(--violet);background:var(--violet-dim);}
+  .pill.oos{color:var(--text-muted);background:var(--input);}
+  .pill.non{color:var(--text-dim);background:transparent;border:1px solid var(--border);}
+  .halluc{display:inline-block;padding:2px 8px;border-radius:999px;font-family:var(--mono);font-size:10px;font-weight:700;color:var(--critical);background:var(--critical-dim);}
+  .score-low{color:var(--warn);} .dotmuted{color:var(--text-dim);}
+  .table-foot{padding:11px 22px;font-family:var(--mono);font-size:10.5px;color:var(--text-muted);border-top:1px solid var(--border);}
+
+  .footer{margin-top:34px;padding:20px 0 0;border-top:1px solid var(--border);display:flex;justify-content:space-between;gap:32px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;letter-spacing:0.05em;color:var(--text-muted);}
+  .footer strong{color:var(--text-2);font-weight:500;}
+
+  .reveal{opacity:0;transform:translateY(8px);animation:reveal .6s ease forwards;}
+  @keyframes reveal{to{opacity:1;transform:none;}}
+  .r1{animation-delay:.05s;}.r2{animation-delay:.12s;}.r3{animation-delay:.19s;}.r4{animation-delay:.27s;}.r5{animation-delay:.35s;}
+  @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;}.reveal{opacity:1;transform:none;}}
+
+  @media (max-width:1180px){
+    .kpi-grid{grid-template-columns:repeat(2,1fr);}
+    .quality{grid-template-columns:repeat(2,1fr);}
+    .split-row{grid-template-columns:1fr;}
+    .topbar{grid-template-columns:1fr;gap:18px;}
+    .topbar-nav{margin:0;justify-self:start;flex-wrap:wrap;}
+  }
+  @media (max-width:600px){.kpi-grid,.quality{grid-template-columns:1fr;}.c-q{max-width:180px;}}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- command bar -->
+  <header class="topbar reveal r1">
+    <div class="brand">
+      <div class="brand-mark">P</div>
+      <div>
+        <div class="brand-name">PIMS <span class="accent">Advisor</span></div>
+        <div class="brand-sub">규정·법령 어드바이저 · 운영 콘솔 · v0.5.0</div>
+      </div>
+    </div>
+    <nav class="topbar-nav">
+      <a class="active">개요</a><a>질의 로그</a><a>규정 색인</a><a>법령 캐시</a><a>설정</a>
+    </nav>
+    <div class="status-cluster">
+      <div class="live-pill"><span class="dot"></span><span>읽기 전용 · service_role</span></div>
+      <div class="time"><strong id="clk-date">2026.07.08</strong> · <span id="clk-time">15:40</span></div>
+    </div>
+  </header>
+
+  <!-- page head -->
+  <section class="page-head reveal r1">
+    <div>
+      <h1>규정·법령 <em>어드바이저</em> 운영 현황</h1>
+      <div class="sub"><span>query_log · 24건</span><span>2026-05-28 ~ 07-08</span><span>last sync 15:36</span></div>
+    </div>
+    <div class="periods"><a>24시간</a><a>7일</a><a class="active">전체</a></div>
+  </section>
+
+  <!-- KPI grid : 사용량 · 이용자 수 · 이용률 · 응답시간 -->
+  <section class="kpi-grid">
+    <div class="kpi live reveal r2">
+      <div class="kpi-top"><span class="kpi-label">사용량</span><span class="kpi-idx">01</span></div>
+      <div class="kpi-number">24</div>
+      <div class="kpi-meta"><span>누적 질의</span><span>전체 기간</span></div>
+      <svg class="kpi-spark" data-spark="1,3,9,6,6,2" data-color="#0a94ab"></svg>
+    </div>
+    <div class="kpi reveal r3">
+      <div class="kpi-top"><span class="kpi-label">이용자 수</span><span class="kpi-idx">02</span></div>
+      <div class="kpi-number">1</div>
+      <div class="kpi-meta"><span>고유 IP</span><span>오픈 전 내부</span></div>
+      <svg class="kpi-spark" data-spark="1,1,1,1,1" data-color="#9aa7b4"></svg>
+    </div>
+    <div class="kpi reveal r4">
+      <div class="kpi-top"><span class="kpi-label">이용률</span><span class="kpi-idx">03</span></div>
+      <div class="kpi-number">24.0</div>
+      <div class="kpi-meta"><span>평균 질문/인</span><span>사용량÷이용자</span></div>
+      <svg class="kpi-spark" data-spark="4,9,14,18,24" data-color="#4f57d8"></svg>
+    </div>
+    <div class="kpi reveal r5">
+      <div class="kpi-top"><span class="kpi-label">평균 응답시간</span><span class="kpi-idx">04</span></div>
+      <div class="kpi-number">18.2<span class="unit">s</span></div>
+      <div class="kpi-meta"><span>첫토큰 6.2s</span><span>total_ms</span></div>
+      <svg class="kpi-spark" data-spark="16,19,16,23,19,9,18,18" data-color="#b7791f"></svg>
+    </div>
+  </section>
+
+  <!-- 품질 지표 스트립 : 환각률 · 인용검증률 · 오류율 · 저관련도 -->
+  <section class="quality">
+    <div class="q reveal r3">
+      <div class="q-head"><span class="q-dot crit"></span><span class="q-name">환각률</span></div>
+      <div class="q-sub">인용 검증 실패 응답</div>
+      <div class="q-row"><span class="q-value crit">29%</span><span class="q-note">7건 / 24</span></div>
+      <div class="meter"><span style="width:29%;background:linear-gradient(90deg,rgba(217,58,58,.5),#d93a3a);box-shadow:0 0 6px -1px rgba(217,58,58,.6);"></span></div>
+    </div>
+    <div class="q reveal r3">
+      <div class="q-head"><span class="q-dot ok"></span><span class="q-name">인용 검증률</span></div>
+      <div class="q-sub">법제처 원문 대조 통과</div>
+      <div class="q-row"><span class="q-value ok">70%</span><span class="q-note">30 / 43</span></div>
+      <div class="meter"><span style="width:70%;background:linear-gradient(90deg,rgba(18,146,90,.5),#12925a);box-shadow:0 0 6px -1px rgba(18,146,90,.6);"></span></div>
+    </div>
+    <div class="q reveal r4">
+      <div class="q-head"><span class="q-dot crit"></span><span class="q-name">오류율</span></div>
+      <div class="q-sub">error_code 발생 요청</div>
+      <div class="q-row"><span class="q-value crit">8%</span><span class="q-note">2건 / 24</span></div>
+      <div class="meter"><span style="width:8%;background:linear-gradient(90deg,rgba(217,58,58,.5),#d93a3a);box-shadow:0 0 6px -1px rgba(217,58,58,.6);"></span></div>
+    </div>
+    <div class="q reveal r4">
+      <div class="q-head"><span class="q-dot warn"></span><span class="q-name">저관련도</span></div>
+      <div class="q-sub">기준치 미만(below_threshold)</div>
+      <div class="q-row"><span class="q-value warn">54%</span><span class="q-note">13건 / 24</span></div>
+      <div class="meter"><span style="width:54%;background:linear-gradient(90deg,rgba(183,121,31,.5),#b7791f);box-shadow:0 0 6px -1px rgba(183,121,31,.6);"></span></div>
+    </div>
+  </section>
+
+  <!-- 사용량 추이 + 분기 분포 -->
+  <section class="split-row reveal r5">
+    <!-- 추이 -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title"><h2>사용량 <em>추이</em></h2><span class="meta">일별 질의 수</span></div>
+        <div class="tab-group"><div class="tab">24h</div><div class="tab active">전체</div></div>
+      </div>
+      <div class="chart-body">
+        <svg class="chart-svg" id="usageChart"
+          data-values="1,9,6,6,2" data-labels="05/28,06/25,06/30,07/07,07/08" data-color="#0a94ab"></svg>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-sw" style="background:#0a94ab"></span>일별 질의 수</span>
+          <span class="legend-item" style="margin-left:auto;">기록된 5일 · <strong style="color:#0f1922">24 질의</strong></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 분기 분포 -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title"><h2>분기 <em>분포</em></h2><span class="meta">route · 24건</span></div>
+      </div>
+      <div class="donut-body">
+        <div class="donut-chart">
+          <div id="routeDonut" style="width:100%;height:100%"></div>
+          <div class="donut-center"><span class="dc-num">24</span><span class="dc-lab">질의</span></div>
+        </div>
+        <div class="legend-list">
+          <div class="ll-row"><span class="ll-sw" style="background:#0a94ab"></span><span class="ll-name">규정</span><span class="ll-pct">33%</span><span class="ll-cnt">8</span></div>
+          <div class="ll-row"><span class="ll-sw" style="background:#4f57d8"></span><span class="ll-name">법령</span><span class="ll-pct">46%</span><span class="ll-cnt">11</span></div>
+          <div class="ll-row"><span class="ll-sw" style="background:#8592a0"></span><span class="ll-name">범위밖</span><span class="ll-pct">8%</span><span class="ll-cnt">2</span></div>
+          <div class="ll-row"><span class="ll-sw" style="background:#c2ccd6"></span><span class="ll-name">미분류</span><span class="ll-pct">13%</span><span class="ll-cnt">3</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 질의 로그 표 (실데이터) -->
+  <section class="panel reveal r5">
+    <div class="panel-header">
+      <div class="panel-title"><h2>질의 <em>로그</em></h2><span class="meta">최근 12건 · query_log</span></div>
+    </div>
+    <div class="filter-bar">
+      <input class="search" placeholder="질문 · IP 검색…" />
+      <span class="chip active">전체<span class="count">·24</span></span>
+      <span class="chip">규정<span class="count">·8</span></span>
+      <span class="chip">법령<span class="count">·11</span></span>
+      <span class="chip">범위밖<span class="count">·2</span></span>
+      <span class="chip">환각만<span class="count">·7</span></span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>시각</th><th>IP</th><th>질문</th><th>분기</th>
+            <th style="text-align:right;">관련도</th><th style="text-align:center;">환각</th>
+            <th style="text-align:right;">응답</th><th style="text-align:right;">토큰</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="c-time">07-08 06:36</td><td class="c-ip">::1</td><td class="c-q">중간보고서 제출 일자 알려줘</td><td><span class="pill reg">규정</span></td><td class="c-num">0.627</td><td style="text-align:center;"><span class="dotmuted">·</span></td><td class="c-num">16.4s</td><td class="c-num">3,806</td></tr>
+          <tr><td class="c-time">07-08 06:31</td><td class="c-ip">::1</td><td class="c-q">중간보고서 제출 기한을 알려줘</td><td><span class="pill reg">규정</span></td><td class="c-num">0.682</td><td style="text-align:center;"><span class="dotmuted">·</span></td><td class="c-num">19.2s</td><td class="c-num">3,886</td></tr>
+          <tr><td class="c-time">07-07 06:58</td><td class="c-ip">::1</td><td class="c-q">증빙 서류는 뭐가 필요한가요?</td><td><span class="pill reg">규정</span></td><td class="c-num score-low">0.369</td><td style="text-align:center;"><span class="dotmuted">·</span></td><td class="c-num">15.7s</td><td class="c-num">2,856</td></tr>
+          <tr><td class="c-time">07-07 06:58</td><td class="c-ip">::1</td><td class="c-q">사업비 정산 기한이 언제인가요?</td><td><span class="pill reg">규정</span></td><td class="c-num score-low">0.489</td><td style="text-align:center;"><span class="dotmuted">·</span></td><td class="c-num">19.3s</td><td class="c-num">4,713</td></tr>
+          <tr><td class="c-time">07-07 06:40</td><td class="c-ip">::1</td><td class="c-q">__VERIFY_ERR_LOG__</td><td><span class="pill non">오류</span></td><td class="c-num">–</td><td style="text-align:center;"><span class="dotmuted">·</span></td><td class="c-num">1ms</td><td class="c-num">0</td></tr>
+          <tr><td class="c-time">07-07 06:39</td><td class="c-ip">::1</td><td class="c-q">근로기준법상 연장근로의 주당 한도는 몇 시간인가요?</td><td><span class="pill law">법령</span></td><td class="c-num score-low">0.100</td><td style="text-align:center;"><span class="dotmuted">·</span></td><td class="c-num">22.9s</td><td class="c-num">4,316</td></tr>
+          <tr><td class="c-time">07-07 06:38</td><td class="c-ip">::1</td><td class="c-q">연구개발비 정산은 어떻게 하나요?</td><td><span class="pill reg">규정</span></td><td class="c-num">0.512</td><td style="text-align:center;"><span class="dotmuted">·</span></td><td class="c-num">19.1s</td><td class="c-num">4,247</td></tr>
+          <tr><td class="c-time">07-07 06:38</td><td class="c-ip">::1</td><td class="c-q">오늘 서울 날씨 어때?</td><td><span class="pill oos">범위밖</span></td><td class="c-num score-low">0.064</td><td style="text-align:center;"><span class="dotmuted">·</span></td><td class="c-num">8.9s</td><td class="c-num">172</td></tr>
+          <tr><td class="c-time">06-30 06:50</td><td class="c-ip">::1</td><td class="c-q">중간보고서 일정 알려줘</td><td><span class="pill non">미분류</span></td><td class="c-num">–</td><td style="text-align:center;"><span class="dotmuted">·</span></td><td class="c-num">17.9s</td><td class="c-num">0</td></tr>
+          <tr><td class="c-time">06-30 01:58</td><td class="c-ip">::1</td><td class="c-q">인건비 중에 초과근무수당을 지급할 수 있어?</td><td><span class="pill reg">규정</span></td><td class="c-num">0.675</td><td style="text-align:center;"><span class="dotmuted">·</span></td><td class="c-num">21.2s</td><td class="c-num">9,381</td></tr>
+          <tr><td class="c-time">06-30 01:49</td><td class="c-ip">::1</td><td class="c-q">박지성 바보</td><td><span class="pill oos">범위밖</span></td><td class="c-num score-low">0.067</td><td style="text-align:center;"><span class="dotmuted">·</span></td><td class="c-num">6.5s</td><td class="c-num">1,334</td></tr>
+          <tr><td class="c-time">06-30 01:49</td><td class="c-ip">::1</td><td class="c-q">육아휴직 기간은 얼마나돼?</td><td><span class="pill law">법령</span></td><td class="c-num score-low">0.053</td><td style="text-align:center;"><span class="halluc">환각</span></td><td class="c-num">25.0s</td><td class="c-num">10,826</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="table-foot">최근 12건 표시 · 행 클릭 시 상세(질문·답변·인용 verdict·지연 분해) 패널 — 기존 상세 로직 연결</div>
+  </section>
+
+  <footer class="footer">
+    <div><strong>SOURCE</strong> query_log · regulation · law_cache</div>
+    <div>rerank cohere · llm claude · runtime node</div>
+    <div>PIMS · 규정·법령 어드바이저 · <strong>2026</strong></div>
+  </footer>
+
+</div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/prop-types@15/prop-types.min.js" crossorigin></script>
+<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.min.js" crossorigin></script>
+<script>
+  (function(){var d=document.getElementById('clk-date'),t=document.getElementById('clk-time');
+   function p(n){return String(n).padStart(2,'0');}
+   function tick(){var n=new Date();
+     if(d)d.textContent=n.getFullYear()+'.'+p(n.getMonth()+1)+'.'+p(n.getDate());
+     if(t)t.textContent=p(n.getHours())+':'+p(n.getMinutes());}
+   tick();setInterval(tick,10000);})();
+  function bind(s){var xs=document.querySelectorAll(s);xs.forEach(function(el){el.addEventListener('click',function(e){if(el.tagName==='A')e.preventDefault();xs.forEach(function(x){x.classList.remove('active');});el.classList.add('active');});});}
+  bind('.topbar-nav a');bind('.periods a');bind('.tab-group .tab');bind('.filter-bar .chip');
+
+  // ── charts (smooth, self-contained) ──────────────────────────────
+  function smooth(p){
+    var n=p.length,i,d=[],m=[];
+    if(n<2) return n? 'M'+p[0][0]+','+p[0][1] : '';
+    for(i=0;i<n-1;i++) d[i]=(p[i+1][1]-p[i][1])/((p[i+1][0]-p[i][0])||1);
+    m[0]=d[0]; m[n-1]=d[n-2];
+    for(i=1;i<n-1;i++) m[i]=(d[i-1]*d[i]<=0)?0:(d[i-1]+d[i])/2;
+    var s='M'+p[0][0].toFixed(1)+','+p[0][1].toFixed(1);
+    for(i=0;i<n-1;i++){var x0=p[i][0],y0=p[i][1],x1=p[i+1][0],y1=p[i+1][1],dx=(x1-x0)/3;
+      s+=' C'+(x0+dx).toFixed(1)+','+(y0+m[i]*dx).toFixed(1)+' '+(x1-dx).toFixed(1)+','+(y1-m[i+1]*dx).toFixed(1)+' '+x1.toFixed(1)+','+y1.toFixed(1);}
+    return s;
+  }
+  var _u=0; function uid(){return 'g'+(++_u);}
+
+  function drawSpark(svg){
+    var data=svg.getAttribute('data-spark').split(',').map(Number), color=svg.getAttribute('data-color');
+    var W=120,H=30,pad=4, max=Math.max.apply(null,data),min=Math.min.apply(null,data),flat=(max===min),rng=(max-min)||1;
+    var pts=data.map(function(v,i){return [pad+i*(W-2*pad)/((data.length-1)||1), flat?H*0.5:H-pad-((v-min)/rng)*(H-2*pad)];});
+    var line=smooth(pts),last=pts[pts.length-1], area=line+' L'+last[0].toFixed(1)+','+H+' L'+pts[0][0].toFixed(1)+','+H+' Z', id=uid();
+    svg.setAttribute('viewBox','0 0 '+W+' '+H); svg.setAttribute('preserveAspectRatio','none');
+    svg.innerHTML='<defs><linearGradient id="'+id+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="'+color+'" stop-opacity="0.24"/><stop offset="100%" stop-color="'+color+'" stop-opacity="0"/></linearGradient></defs>'+
+      '<path d="'+area+'" fill="url(#'+id+')"/>'+
+      '<path d="'+line+'" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>';
+  }
+
+  function drawUsage(svg){
+    var vals=svg.getAttribute('data-values').split(',').map(Number), labels=svg.getAttribute('data-labels').split(','), color=svg.getAttribute('data-color');
+    var W=800,H=210,L=42,R=18,T=18,B=30, iw=W-L-R, ih=H-T-B, max=Math.max.apply(null,vals)||1, id=uid();
+    var pts=vals.map(function(v,i){return [L+i*iw/((vals.length-1)||1), T+ih-(v/max)*ih];});
+    var line=smooth(pts), area=line+' L'+pts[pts.length-1][0].toFixed(1)+','+(T+ih)+' L'+pts[0][0].toFixed(1)+','+(T+ih)+' Z';
+    var grid='',ylab='',steps=3,g,gy,val;
+    for(g=0;g<=steps;g++){ gy=T+ih*g/steps; val=Math.round(max*(steps-g)/steps);
+      grid+='<line x1="'+L+'" y1="'+gy.toFixed(1)+'" x2="'+(W-R)+'" y2="'+gy.toFixed(1)+'" stroke="#e7ecf1" stroke-width="1"/>';
+      ylab+='<text x="'+(L-8)+'" y="'+(gy+3.5).toFixed(1)+'" fill="#9aa7b4" font-size="10" text-anchor="end" font-family="JetBrains Mono, monospace">'+val+'</text>'; }
+    var dots='',xlab=''; pts.forEach(function(pt,i){
+      xlab+='<text x="'+pt[0].toFixed(1)+'" y="'+(H-9)+'" fill="#9aa7b4" font-size="10" text-anchor="middle" font-family="JetBrains Mono, monospace">'+labels[i]+'</text>';
+      dots+='<circle cx="'+pt[0].toFixed(1)+'" cy="'+pt[1].toFixed(1)+'" r="3.2" fill="#fff" stroke="'+color+'" stroke-width="2"/>'; });
+    var lp=pts[pts.length-1];
+    var halo='<circle cx="'+lp[0].toFixed(1)+'" cy="'+lp[1].toFixed(1)+'" r="7" fill="'+color+'" opacity="0.14"/>';
+    svg.setAttribute('viewBox','0 0 '+W+' '+H); svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+    svg.innerHTML='<defs><linearGradient id="'+id+'" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="'+color+'" stop-opacity="0.20"/><stop offset="100%" stop-color="'+color+'" stop-opacity="0.01"/></linearGradient></defs>'+
+      grid+ylab+'<path d="'+area+'" fill="url(#'+id+')"/>'+
+      '<path d="'+line+'" fill="none" stroke="'+color+'" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'+halo+dots+xlab;
+  }
+
+  function polar(cx,cy,r,deg){var a=(deg-90)*Math.PI/180;return [cx+r*Math.cos(a),cy+r*Math.sin(a)];}
+  function arcPath(cx,cy,r,a0,a1){var s=polar(cx,cy,r,a0),e=polar(cx,cy,r,a1),large=(a1-a0)>180?1:0;
+    return 'M'+s[0].toFixed(2)+','+s[1].toFixed(2)+' A'+r+','+r+' 0 '+large+' 1 '+e[0].toFixed(2)+','+e[1].toFixed(2);}
+  document.querySelectorAll('.kpi-spark').forEach(drawSpark);
+  var _uc=document.getElementById('usageChart'); if(_uc) drawUsage(_uc);
+
+  // 분기 분포 — Recharts 도넛차트 (가운데 총계 · 링 % 라벨 · 흰 구분선)
+  (function(){
+    var host=document.getElementById('routeDonut');
+    if(!host || !(window.React && window.ReactDOM && window.Recharts)) return;
+    var e=React.createElement, R=Recharts, RAD=Math.PI/180;
+    var data=[
+      {name:'규정',   value:8,  color:'#0a94ab'},
+      {name:'법령',   value:11, color:'#4f57d8'},
+      {name:'범위밖', value:2,  color:'#8592a0'},
+      {name:'미분류', value:3,  color:'#c2ccd6'}
+    ];
+    function label(p){
+      if(p.percent<0.05) return null;
+      var r=(p.innerRadius+p.outerRadius)/2, x=p.cx+r*Math.cos(-p.midAngle*RAD), y=p.cy+r*Math.sin(-p.midAngle*RAD);
+      var fill=(p.name==='미분류')?'#46525f':'#ffffff';
+      return e('text',{x:x,y:y,fill:fill,fontSize:12.5,fontWeight:600,textAnchor:'middle',dominantBaseline:'central'},Math.round(p.percent*100)+'%');
+    }
+    function PieC(){
+      return e(R.ResponsiveContainer,{width:'100%',height:'100%'},
+        e(R.PieChart,{margin:{top:6,right:6,bottom:6,left:6}},
+          e(R.Pie,{data:data,dataKey:'value',nameKey:'name',cx:'50%',cy:'50%',
+            innerRadius:'62%',outerRadius:'96%',stroke:'#ffffff',strokeWidth:2,
+            startAngle:90,endAngle:-270,animationDuration:700,label:label,labelLine:false},
+            data.map(function(d,i){return e(R.Cell,{key:i,fill:d.color});}))
+        )
+      );
+    }
+    ReactDOM.createRoot(host).render(e(PieC));
+  })();
+</script>
+</body>
+</html>
