@@ -178,11 +178,13 @@ export async function* chatStream(
  * RAG 챗 스트림: 멀티턴 히스토리를 유지하면서, 마지막 user 메시지에만
  * 검색된 청크를 <context> 블록으로 감싸 주입한다.
  */
+export type TokenUsage = { input: number; output: number };
+
 export async function* ragChatStream(
   messages: ChatMessage[],
   retrievedDocs: RetrievedDoc[],
   lawContext?: string,
-): AsyncGenerator<string> {
+): AsyncGenerator<string, TokenUsage | undefined> {
   if (messages.length === 0) return;
 
   const lastIdx = messages.length - 1;
@@ -218,5 +220,26 @@ export async function* ragChatStream(
     ) {
       yield event.delta.text;
     }
+  }
+
+  // 스트림 소비 후 최종 메시지에서 토큰 사용량을 회수(감사 로그용). 실패해도
+  // 답변엔 영향 없도록 undefined 로 폴백한다.
+  try {
+    const u = await stream.finalMessage().then((m) => m.usage);
+    // 시스템 프롬프트가 prompt caching 되어 input_tokens 엔 비캐시분만 잡힌다.
+    // 실제 처리한 입력 총량을 위해 캐시 생성/읽기 토큰을 합산한다.
+    return {
+      input:
+        u.input_tokens +
+        (u.cache_read_input_tokens ?? 0) +
+        (u.cache_creation_input_tokens ?? 0),
+      output: u.output_tokens,
+    };
+  } catch (err) {
+    console.error(
+      "[chat] finalMessage usage unavailable:",
+      (err as Error).message,
+    );
+    return undefined;
   }
 }

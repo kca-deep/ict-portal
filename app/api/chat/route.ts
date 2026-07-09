@@ -23,6 +23,7 @@ import {
 } from "@/lib/law/verify";
 import { env } from "@/lib/env";
 import { checkRateLimit } from "@/lib/security/ratelimit";
+import { logQuery, type QueryLogRow } from "@/lib/db/query-log";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -134,6 +135,16 @@ function buildPrecedentContext(
   return `[관련 판례]\n${lines.join("\n")}`;
 }
 
+// 클라이언트 IP 추출. 프록시 체인 첫 홉(x-forwarded-for) 우선, 없으면 x-real-ip 로
+// 폴백한다. Vercel/Next 은 x-forwarded-for 를 세팅하며(로컬 dev 는 소켓 기준 ::1),
+// 일부 프록시는 x-real-ip 만 준다. 빈 문자열은 undefined 로 정규화(레이트리밋·로그 일관).
+function clientIpFrom(req: NextRequest): string | undefined {
+  const xff = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  if (xff) return xff;
+  const real = req.headers.get("x-real-ip")?.trim();
+  return real || undefined;
+}
+
 function isValidMessages(value: unknown): value is ChatMessage[] {
   if (!Array.isArray(value) || value.length === 0) return false;
   if (value.length > env.MAX_TURNS) return false;
@@ -165,7 +176,7 @@ export async function POST(req: NextRequest) {
   }
 
   // 레이트리밋(활성 시). 비활성이면 checkRateLimit 이 즉시 통과(기존 동작 유지).
-  const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const clientIp = clientIpFrom(req);
   if (!(await checkRateLimit(clientIp)).ok) {
     return new Response("rate limit exceeded", { status: 429 });
   }
@@ -183,11 +194,24 @@ export async function POST(req: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      // 감사 로그(query_log) 누적 버퍼. 성공/실패 어느 쪽이든 finally 에서 한 번
+      // fire-and-forget 으로 적재한다(응답 스트림 종료를 지연시키지 않음).
+      const tStart = Date.now();
+      let ttftMs: number | null = null;
+      const logRow: QueryLogRow = {
+        query,
+        ip: clientIp ?? null,
+        message_count: body.messages.length,
+      };
       try {
         // 1) 최대 RETRIEVAL_TOP_K(=30)건 후보 검색 → 2) Cohere 재정렬로 관련도 산출
         //    → 3) 상위 RERANK_TOP_K(=8)건만 LLM 근거로 사용
+        const tRetrieval = Date.now();
         const hits = await regulationSearch(query, env.RETRIEVAL_TOP_K);
+        logRow.retrieval_ms = Date.now() - tRetrieval;
+        const tRerank = Date.now();
         const sources = await topRerankedSources(query, hits);
+        logRow.rerank_ms = Date.now() - tRerank;
 
         const retrievedDocs: RetrievedDoc[] = sources.map((s) => ({
           title: s.title,
@@ -225,6 +249,15 @@ export async function POST(req: NextRequest) {
         // 범위 밖이면 어느 쪽도 아님(거절).
         const routedToLaw =
           !outOfScope && (belowThreshold || grayZoneInsufficient);
+
+        // 분기·관련도·게이트 신호 기록(검색 후보는 [{id,score}] 로 경량 저장).
+        logRow.route = outOfScope ? "out_of_scope" : routedToLaw ? "law" : "regulation";
+        logRow.top_score = maxScore;
+        logRow.below_threshold = belowThreshold;
+        logRow.gate_sufficient = inGrayZone ? !grayZoneInsufficient : null;
+        logRow.out_of_scope = outOfScope;
+        logRow.retrieved = sources.map((s) => ({ id: s.id, score: s.score }));
+        logRow.retrieved_doc_ids = sources.filter((s) => s.id > 0).map((s) => s.id);
 
         let lawContext: string | undefined;
         // 통합: 검색(searchAiLaw)은 LLM 근거(lawContext) + 인용 검증 재사용(retrieved)
@@ -272,6 +305,8 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        logRow.law_refs = lawRefs;
+
         console.log(
           `[chat] route=${outOfScope ? "out_of_scope" : routedToLaw ? "law" : "regulation"} maxScore=${maxScore.toFixed(3)} ` +
             `threshold=${env.RELEVANCE_THRESHOLD} grayUpper=${env.RELEVANCE_GRAY_UPPER} ` +
@@ -287,10 +322,24 @@ export async function POST(req: NextRequest) {
         // 섞이면서 출처는 법령만 표시되던 "표시≠사용" 불일치를 제거.
         const answerDocs = outOfScope || routedToLaw ? [] : retrievedDocs;
         const answerLawContext = outOfScope ? undefined : lawContext;
-        for await (const chunk of ragChatStream(body.messages, answerDocs, answerLawContext)) {
-          answerText += chunk;
-          send(controller, { type: "delta", text: chunk });
+        const tLlm = Date.now();
+        // 제너레이터를 수동으로 구동해 텍스트 청크를 스트리밍하고, 종료 시 return 값
+        // (토큰 사용량)을 회수한다. for-await 는 return 값을 버리므로 수동 반복 사용.
+        const gen = ragChatStream(body.messages, answerDocs, answerLawContext);
+        let step = await gen.next();
+        while (!step.done) {
+          if (ttftMs === null) ttftMs = Date.now() - tStart; // 첫 토큰까지 지연
+          answerText += step.value;
+          send(controller, { type: "delta", text: step.value });
+          step = await gen.next();
         }
+        const usage = step.value;
+        logRow.llm_ms = Date.now() - tLlm;
+        logRow.answer = answerText;
+        logRow.answer_truncated = false;
+        logRow.llm_model = env.LLM_MODEL;
+        logRow.tokens_in = usage?.input ?? null;
+        logRow.tokens_out = usage?.output ?? null;
 
         // 6) 법령 분기면 답변의 조문 인용을 법제처 DB와 교차 검증한다(환각 차단).
         //    검증은 "답변이 실제 인용한 조문"을 본문과 함께 돌려주므로, 검색(aiSearch)이
@@ -320,6 +369,18 @@ export async function POST(req: NextRequest) {
             metadata: { kind: "law", lawId: v.lawId, article: v.article, cited: true },
             score: 0,
           }));
+
+        // 인용 검증 신호 기록(본문 body 는 제외해 로그를 가볍게).
+        if (citationCheck) {
+          const verdicts = citationCheck.verdicts;
+          logRow.citation_count = verdicts.length;
+          logRow.citation_verified_count = verdicts.filter(
+            (v) => v.status === "verified",
+          ).length;
+          logRow.citation_verified = !citationCheck.hasHallucination;
+          logRow.has_hallucination = citationCheck.hasHallucination;
+          logRow.cited_law_refs = verdicts.map(({ body: _body, ...v }) => v);
+        }
 
         // 7) 라우팅·참조문서 전송. 법령 분기는 답변이 인용·검증한 조문만 표시(검색 후보로
         //    폴백하지 않음 — 인용이 0건이면 판례만, 그것도 없으면 빈 표시). 규정 분기면
@@ -355,8 +416,13 @@ export async function POST(req: NextRequest) {
 
         send(controller, { type: "done" });
       } catch (err) {
+        logRow.error_code = (err as Error).name || "stream_error";
         send(controller, { type: "error", message: (err as Error).message });
       } finally {
+        logRow.ttft_ms = ttftMs;
+        logRow.total_ms = Date.now() - tStart;
+        // 적재 실패가 응답을 막지 않도록 await 하지 않는다(내부에서 예외 삼킴).
+        void logQuery(logRow);
         controller.close();
       }
     },
