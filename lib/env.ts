@@ -20,8 +20,11 @@ const envSchema = z.object({
   // ingest 관리자 시크릿 — 미설정 시 /api/ingest 는 항상 403(외부 노출 금지).
   INGEST_SECRET: z.string().optional(),
 
-  // 관리자 페이지(/admin) 보호 비밀번호. 로그인이 없어 이 단일 비밀번호 + 서명
-  // httpOnly 쿠키로 관리자 화면을 보호한다. 미설정 시 /admin 은 항상 차단된다.
+  // 관리자 페이지(/admin) 보호 계정. 로그인이 없어 이 아이디+비밀번호 + 서명
+  // httpOnly 쿠키로 관리자 화면을 보호한다. 둘 중 하나라도 미설정이면 /admin 은
+  // 항상 차단된다. 세션 서명 키는 여전히 ADMIN_PASSWORD 를 쓴다(비번을 바꾸면
+  // 기존 세션 자동 무효화). ADMIN_USERNAME 은 로그인 시점 게이트에만 관여한다.
+  ADMIN_USERNAME: z.string().optional(),
   ADMIN_PASSWORD: z.string().optional(),
 
   // 입력 캡 — 한 요청의 대화 턴 수·메시지 글자 수 상한(비용/남용 방지).
@@ -57,7 +60,8 @@ const envSchema = z.object({
     "ANTHROPIC_API_KEY", // 답변 LLM
     "COHERE_API_KEY", // 재정렬
     "LAW_GO_KR_API_KEY", // 법제처 조회
-    "ADMIN_PASSWORD", // 관리자 페이지 보호
+    "ADMIN_USERNAME", // 관리자 페이지 보호(아이디)
+    "ADMIN_PASSWORD", // 관리자 페이지 보호(비밀번호)
   ] as const;
   for (const key of required) {
     if (!val[key]) {
