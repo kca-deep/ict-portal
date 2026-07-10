@@ -35,15 +35,25 @@ export type QueryLogRow = {
 };
 
 /**
- * 감사 로그 적재(fire-and-forget). 호출부는 await 하지 않는다 — 적재 지연/실패가
- * 사용자 응답에 영향을 주지 않도록, 실패는 조용히 서버 로그로만 남긴다.
+ * 감사 로그 적재. 삽입된 행 id 를 반환한다(실패 시 null, 조용히 서버 로그로만 남김).
+ * 답변 스트리밍이 끝난 뒤 성공 경로에서 await 해 id 를 피드백 상관용으로 회수하고,
+ * 에러 경로 등에서는 호출부가 await 없이(void) 적재해 응답 지연을 만들지 않는다.
  */
-export async function logQuery(row: QueryLogRow): Promise<void> {
+export async function logQuery(row: QueryLogRow): Promise<number | null> {
   try {
-    const { error } = await getSupabaseAdmin().from("query_log").insert(row);
-    if (error) console.error("[query-log] insert failed:", error.message);
+    const { data, error } = await getSupabaseAdmin()
+      .from("query_log")
+      .insert(row)
+      .select("id")
+      .single();
+    if (error) {
+      console.error("[query-log] insert failed:", error.message);
+      return null;
+    }
+    return (data?.id as number | undefined) ?? null;
   } catch (err) {
     console.error("[query-log] insert threw:", (err as Error).message);
+    return null;
   }
 }
 
@@ -53,6 +63,7 @@ export async function logQuery(row: QueryLogRow): Promise<void> {
 
 export type QueryLogFilter = {
   limit?: number;
+  offset?: number; // 페이징 시작 위치. 지정 시 range(offset, offset+limit-1) 로 조회.
   route?: "regulation" | "law" | "out_of_scope";
   hallucinationOnly?: boolean;
   ip?: string;
@@ -103,16 +114,22 @@ const LIST_COLUMNS =
 export async function listQueryLogs(
   filter: QueryLogFilter = {},
 ): Promise<QueryLogListItem[]> {
+  const limit = filter.limit ?? 100;
   let q = getSupabaseAdmin()
     .from("query_log")
     .select(LIST_COLUMNS)
-    .order("created_at", { ascending: false })
-    .limit(filter.limit ?? 100);
+    .order("created_at", { ascending: false });
 
   if (filter.route) q = q.eq("route", filter.route);
   if (filter.hallucinationOnly) q = q.eq("has_hallucination", true);
   if (filter.ip) q = q.eq("ip", filter.ip);
   if (filter.since) q = q.gte("created_at", filter.since);
+
+  // offset 이 있으면 range(페이징), 없으면 상위 limit 건.
+  q =
+    filter.offset != null
+      ? q.range(filter.offset, filter.offset + limit - 1)
+      : q.limit(limit);
 
   const { data, error } = await q;
   if (error) throw new Error(`[query-log] list failed: ${error.message}`);

@@ -30,7 +30,12 @@ export const maxDuration = 300;
 
 type ChatRequest = {
   messages: ChatMessage[];
+  session_id?: string;
 };
+
+// 클라이언트가 보내는 세션 식별자 검증용(query_log.session_id 는 uuid 타입).
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type SourceChunk = {
   id: number;
@@ -46,6 +51,7 @@ export type StreamEvent =
   | { type: "routing"; route: "regulation" | "law"; score: number; laws?: { name: string; lawId: string }[] }
   | { type: "delta"; text: string }
   | { type: "citations"; data: CitationVerdict[]; hasHallucination: boolean }
+  | { type: "meta"; queryId: number }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -198,10 +204,16 @@ export async function POST(req: NextRequest) {
       // fire-and-forget 으로 적재한다(응답 스트림 종료를 지연시키지 않음).
       const tStart = Date.now();
       let ttftMs: number | null = null;
+      let logged = false;
+      const sessionId =
+        typeof body.session_id === "string" && UUID_RE.test(body.session_id)
+          ? body.session_id
+          : null;
       const logRow: QueryLogRow = {
         query,
         ip: clientIp ?? null,
         message_count: body.messages.length,
+        session_id: sessionId,
       };
       try {
         // 1) 최대 RETRIEVAL_TOP_K(=30)건 후보 검색 → 2) Cohere 재정렬로 관련도 산출
@@ -414,15 +426,25 @@ export async function POST(req: NextRequest) {
           );
         }
 
+        // 감사 로그 적재(성공 경로). 삽입 행 id 를 받아 피드백 상관용으로 meta
+        // 이벤트에 실어 보낸다. 답변 스트리밍이 끝난 뒤라 이 await 는 체감 지연이 없다.
+        logRow.ttft_ms = ttftMs;
+        logRow.total_ms = Date.now() - tStart;
+        const queryId = await logQuery(logRow);
+        logged = true;
+        if (queryId != null) send(controller, { type: "meta", queryId });
+
         send(controller, { type: "done" });
       } catch (err) {
         logRow.error_code = (err as Error).name || "stream_error";
         send(controller, { type: "error", message: (err as Error).message });
       } finally {
-        logRow.ttft_ms = ttftMs;
-        logRow.total_ms = Date.now() - tStart;
-        // 적재 실패가 응답을 막지 않도록 await 하지 않는다(내부에서 예외 삼킴).
-        void logQuery(logRow);
+        // 에러 등으로 아직 적재 안 됐으면 fire-and-forget 로 남긴다(응답 지연 없음).
+        if (!logged) {
+          logRow.ttft_ms = ttftMs;
+          logRow.total_ms = Date.now() - tStart;
+          void logQuery(logRow);
+        }
         controller.close();
       }
     },

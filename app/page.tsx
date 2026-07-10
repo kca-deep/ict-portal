@@ -1,6 +1,15 @@
 "use client";
 
-import { SquarePen, Copy, Check, ArrowUp, Square, TriangleAlert } from "lucide-react";
+import {
+  SquarePen,
+  Copy,
+  Check,
+  ArrowUp,
+  Square,
+  TriangleAlert,
+  ThumbsUp,
+  ThumbsDown,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Response } from "@/components/ui/response";
 import {
@@ -14,11 +23,15 @@ type Message = {
   content: string;
   sources?: SourceChunk[];
   responseMs?: number;
+  // /api/chat 의 meta 이벤트로 받은 query_log 행 id(피드백 상관용).
+  queryId?: number;
+  feedback?: -1 | 1;
 };
 
 type StreamEvent =
   | { type: "sources"; data: SourceChunk[] }
   | { type: "delta"; text: string }
+  | { type: "meta"; queryId: number }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -40,6 +53,8 @@ export default function Home() {
   const abortRef = useRef<AbortController | null>(null);
   // 사용자가 맨 아래 근처에 있을 때만 자동 스크롤. 위로 올리면 스트리밍 중에도 따라가지 않음.
   const stickToBottomRef = useRef(true);
+  // 대화 단위 세션 식별자(query_log.session_id). 첫 메시지에 생성, '새 대화'에서 리셋.
+  const sessionIdRef = useRef<string | null>(null);
 
   function handleScroll() {
     const el = scrollRef.current;
@@ -129,6 +144,7 @@ export default function Home() {
     const text = input.trim();
     if (!text || loading) return;
 
+    if (!sessionIdRef.current) sessionIdRef.current = crypto.randomUUID();
     stickToBottomRef.current = true;
     const userMsg: Message = { role: "user", content: text };
     const historyForApi = [...messages, userMsg].map(({ role, content }) => ({
@@ -156,7 +172,10 @@ export default function Home() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: historyForApi }),
+        body: JSON.stringify({
+          messages: historyForApi,
+          session_id: sessionIdRef.current,
+        }),
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
@@ -176,6 +195,7 @@ export default function Home() {
       //   프레임 전체 재파싱이 누적된 것. backlog 비례 step + 변화 시에만 렌더로 해소.
       let target = "";
       let sources: SourceChunk[] | undefined;
+      let queryId: number | undefined;
       let displayed = 0;
       let streamDone = false;
       let lastLen = -1;
@@ -190,6 +210,8 @@ export default function Home() {
             content,
             sources,
             responseMs: responseMs ?? prevMsg?.responseMs,
+            queryId,
+            feedback: prevMsg?.feedback,
           };
           return copy;
         });
@@ -244,6 +266,8 @@ export default function Home() {
             sources = ev.data;
           } else if (ev.type === "delta") {
             target += ev.text;
+          } else if (ev.type === "meta") {
+            queryId = ev.queryId;
           } else if (ev.type === "error") {
             throw new Error(ev.message);
           }
@@ -290,6 +314,32 @@ export default function Home() {
     setMessages([]);
     setError(null);
     setActiveSource(null);
+    sessionIdRef.current = null; // 다음 대화는 새 세션으로 시작.
+  }
+
+  // 답변 평가(👍/👎). 같은 값을 다시 누르면 취소(0). 낙관적으로 표시하고 서버에 전송.
+  async function sendFeedback(
+    queryId: number,
+    value: -1 | 1,
+    current: -1 | 1 | undefined,
+  ) {
+    const next = current === value ? 0 : value;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.queryId === queryId
+          ? { ...m, feedback: next === 0 ? undefined : (next as -1 | 1) }
+          : m,
+      ),
+    );
+    try {
+      await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ queryId, value: next }),
+      });
+    } catch {
+      // 전송 실패는 조용히 무시(PoC). 표시는 낙관적으로 유지한다.
+    }
   }
 
   // 버튼 위치: 입력창 우하단. 둥근 모서리 때문에 하단 여백을 우측보다 약간 더 줌.
@@ -480,6 +530,14 @@ export default function Home() {
                             </span>
                           )}
                           <CopyButton text={m.content} />
+                          {m.queryId != null && (
+                            <FeedbackButtons
+                              value={m.feedback}
+                              onVote={(v) =>
+                                sendFeedback(m.queryId!, v, m.feedback)
+                              }
+                            />
+                          )}
                         </div>
                       </>
                     )}
@@ -562,6 +620,48 @@ function CopyButton({ text }: { text: string }) {
         <Copy className="w-3.5 h-3.5" aria-hidden />
       )}
     </button>
+  );
+}
+
+/** 답변 말풍선에 붙는 평가 버튼(👍/👎). 현재 값은 강조 표시하고 재클릭 시 취소. */
+function FeedbackButtons({
+  value,
+  onVote,
+}: {
+  value?: -1 | 1;
+  onVote: (v: -1 | 1) => void;
+}) {
+  const base =
+    "inline-flex items-center justify-center rounded-md p-1 transition-colors";
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      <button
+        onClick={() => onVote(1)}
+        className={`${base} ${
+          value === 1
+            ? "text-primary"
+            : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+        }`}
+        aria-label="도움됨"
+        aria-pressed={value === 1}
+        title="도움돼요"
+      >
+        <ThumbsUp className="w-3.5 h-3.5" aria-hidden />
+      </button>
+      <button
+        onClick={() => onVote(-1)}
+        className={`${base} ${
+          value === -1
+            ? "text-destructive"
+            : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+        }`}
+        aria-label="아쉬움"
+        aria-pressed={value === -1}
+        title="아쉬워요"
+      >
+        <ThumbsDown className="w-3.5 h-3.5" aria-hidden />
+      </button>
+    </span>
   );
 }
 

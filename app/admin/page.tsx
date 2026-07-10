@@ -6,6 +6,8 @@ import {
   type QueryLogFilter,
   type QueryLogStats,
 } from "@/lib/db/query-log";
+import { UsageChart, RouteDonut } from "./charts";
+import { LogTable } from "./log-table";
 
 // 관리자 대시보드(쿼리로그 뷰어). 미들웨어(/admin 게이트)가 서명 쿠키를 통과시킨
 // 요청만 도달한다. 데이터는 전부 서버에서 service_role 로만 읽으므로 그 키가
@@ -23,6 +25,15 @@ const ROUTE_META: Record<
   regulation: { label: "규정", color: "var(--badge-regulation)" },
   law: { label: "법령", color: "var(--badge-law)" },
   out_of_scope: { label: "범위밖", color: "var(--muted-foreground)" },
+};
+
+// 미분류(route 미기록) 버킷. total 에는 포함되므로 도넛·범례에도 반드시 나타나야
+// 합이 100% 가 된다. 범위밖(진한 회색)과 구분되도록 더 밝은 중성색을 쓴다.
+// 미분류(route 미기록) 색. 도넛(charts.tsx routeConfig.unknown)과 반드시 동일해야
+// 범례와 색이 일치한다.
+const UNKNOWN_META = {
+  label: "미분류",
+  color: "oklch(0.72 0.02 75)",
 };
 
 // ── 포매터 ──────────────────────────────────────────────────────────────────
@@ -87,7 +98,7 @@ export default async function AdminPage({
   const selectedId = first(sp.log) ? Number(first(sp.log)) : undefined;
 
   const filter: QueryLogFilter = {
-    limit: 100,
+    limit: 10,
     route,
     hallucinationOnly,
     ip,
@@ -114,6 +125,13 @@ export default async function AdminPage({
     ["범위밖", "out_of_scope"],
   ];
   const periodLabel = period === "24h" ? "최근 24시간" : period === "7d" ? "최근 7일" : "전체 기간";
+  // 도넛 데이터(미분류 포함 → 합 = total). 색은 charts.tsx routeConfig 가 소유.
+  const donutData = [
+    { route: "regulation" as const, count: stats.byRoute.regulation },
+    { route: "law" as const, count: stats.byRoute.law },
+    { route: "out_of_scope" as const, count: stats.byRoute.out_of_scope },
+    { route: "unknown" as const, count: stats.byRoute.unknown },
+  ];
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -169,7 +187,7 @@ export default async function AdminPage({
                 />
               </div>
 
-              <AreaChart series={stats.series} />
+              <UsageChart data={stats.series} />
             </div>
 
             {/* 우: 분기 분포 도넛 */}
@@ -178,20 +196,27 @@ export default async function AdminPage({
                 분기 분포
               </div>
               <div className="mt-4 flex flex-1 items-center gap-6">
-                <Donut stats={stats} />
+                <RouteDonut data={donutData} total={stats.total} />
                 <div className="flex flex-col gap-2.5 text-[13px]">
-                  {(["regulation", "law", "out_of_scope"] as const).map((k) => (
-                    <div key={k} className="flex items-center gap-2">
+                  {[
+                    { label: ROUTE_META.regulation.label, color: ROUTE_META.regulation.color, count: stats.byRoute.regulation },
+                    { label: ROUTE_META.law.label, color: ROUTE_META.law.color, count: stats.byRoute.law },
+                    { label: ROUTE_META.out_of_scope.label, color: ROUTE_META.out_of_scope.color, count: stats.byRoute.out_of_scope },
+                    ...(stats.byRoute.unknown > 0
+                      ? [{ label: UNKNOWN_META.label, color: UNKNOWN_META.color, count: stats.byRoute.unknown }]
+                      : []),
+                  ].map((c) => (
+                    <div key={c.label} className="flex items-center gap-2">
                       <span
                         className="inline-block h-2.5 w-2.5 rounded-sm"
-                        style={{ background: ROUTE_META[k].color }}
+                        style={{ background: c.color }}
                       />
-                      <span className="w-12 text-muted-foreground">{ROUTE_META[k].label}</span>
+                      <span className="w-12 text-muted-foreground">{c.label}</span>
                       <span className="font-mono tabular-nums text-foreground">
-                        {pct(stats.byRoute[k], stats.total)}
+                        {pct(c.count, stats.total)}
                       </span>
                       <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-                        {stats.byRoute[k].toLocaleString()}
+                        {c.count.toLocaleString()}
                       </span>
                     </div>
                   ))}
@@ -208,17 +233,23 @@ export default async function AdminPage({
               value={pct(stats.hallucinationCount, stats.total)}
               note={`${stats.hallucinationCount.toLocaleString()}건`}
               critical={stats.hallucinationCount > 0}
+              meter={pctNum(stats.hallucinationCount, stats.total)}
+              meterColor="var(--destructive)"
             />
             <Kpi
               label="인용 검증률"
               value={pct(stats.citationVerifiedCount, stats.citationCount)}
               note={`${stats.citationVerifiedCount.toLocaleString()}/${stats.citationCount.toLocaleString()}`}
+              meter={pctNum(stats.citationVerifiedCount, stats.citationCount)}
+              meterColor="var(--primary)"
             />
             <Kpi
               label="오류율"
               value={pct(stats.errorCount, stats.total)}
               note={`${stats.errorCount.toLocaleString()}건`}
               critical={stats.errorCount > 0}
+              meter={pctNum(stats.errorCount, stats.total)}
+              meterColor="var(--destructive)"
             />
           </div>
         </section>
@@ -265,87 +296,18 @@ export default async function AdminPage({
         {/* 상세 */}
         {detail && <DetailPanel sp={sp} detail={detail} />}
 
-        {/* 로그 표 */}
-        <section className="mt-6 overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
-          <table className="w-full min-w-[880px] border-collapse text-[13px]">
-            <thead>
-              <tr className="border-b border-border bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
-                <th className="px-4 py-2.5 text-left font-medium">시각</th>
-                <th className="px-4 py-2.5 text-left font-medium">IP</th>
-                <th className="px-4 py-2.5 text-left font-medium">질문</th>
-                <th className="px-4 py-2.5 text-left font-medium">분기</th>
-                <th className="px-4 py-2.5 text-right font-medium">관련도</th>
-                <th className="px-4 py-2.5 text-center font-medium">환각</th>
-                <th className="px-4 py-2.5 text-right font-medium">응답</th>
-                <th className="px-4 py-2.5 text-right font-medium">토큰</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="px-4 py-14 text-center text-muted-foreground">
-                    조건에 맞는 로그가 없습니다.
-                  </td>
-                </tr>
-              )}
-              {rows.map((r) => (
-                <tr
-                  key={r.id}
-                  className={`border-b border-border/60 transition last:border-0 hover:bg-muted/50 ${
-                    selectedId === r.id ? "bg-accent" : ""
-                  }`}
-                >
-                  <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs tabular-nums text-muted-foreground">
-                    {fmtTime(r.created_at)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-muted-foreground">
-                    {r.ip ? (
-                      <Link href={href(sp, { ip: r.ip, log: undefined })} className="hover:text-primary hover:underline">
-                        {r.ip}
-                      </Link>
-                    ) : (
-                      "–"
-                    )}
-                  </td>
-                  <td className="max-w-md px-4 py-2.5">
-                    <Link
-                      href={href(sp, { log: String(r.id) })}
-                      className="block truncate text-foreground hover:text-primary hover:underline"
-                    >
-                      {r.query}
-                    </Link>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-2.5">
-                    {r.route ? <RoutePill route={r.route} /> : <span className="text-muted-foreground">–</span>}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono tabular-nums text-muted-foreground">
-                    {fmtScore(r.top_score)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-center">
-                    {r.has_hallucination ? (
-                      <span
-                        className="inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold text-destructive"
-                        style={{ background: tint("var(--destructive)", 12) }}
-                      >
-                        환각
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground/30">·</span>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono tabular-nums text-muted-foreground">
-                    {fmtDur(r.total_ms)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono text-xs tabular-nums text-muted-foreground">
-                    {((r.tokens_in ?? 0) + (r.tokens_out ?? 0)).toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-
-        <p className="mt-3 text-xs text-muted-foreground/70">최근 {rows.length}건 표시(최대 100).</p>
+        {/* 로그 표 — 초기 20건, "더 조회하기"로 20건씩 이어붙임(SPA) */}
+        <LogTable
+          initialRows={rows}
+          sp={{
+            period,
+            route,
+            halluc: hallucinationOnly ? "1" : undefined,
+            ip,
+          }}
+          since={filter.since}
+          selectedId={selectedId}
+        />
       </div>
     </main>
   );
@@ -378,112 +340,21 @@ function HeroStat({
   );
 }
 
-// 사용량 추이 SVG 영역차트. 서버에서 path 를 직접 계산해 렌더(클라이언트 JS 없음).
-// 폭은 100%로 늘리되(preserveAspectRatio=none) 선은 non-scaling-stroke 로 또렷하게.
-function AreaChart({ series }: { series: { label: string; count: number }[] }) {
-  const n = series.length;
-  const W = 600;
-  const H = 128;
-  const pad = 8;
-  const max = Math.max(1, ...series.map((s) => s.count));
-  const x = (i: number) => (n <= 1 ? W / 2 : pad + (i / (n - 1)) * (W - pad * 2));
-  const y = (c: number) => H - pad - (c / max) * (H - pad * 2);
-  const line = series.map((s, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(s.count).toFixed(1)}`).join(" ");
-  const area =
-    n === 0
-      ? ""
-      : `M${x(0).toFixed(1)},${H} ` +
-        series.map((s, i) => `L${x(i).toFixed(1)},${y(s.count).toFixed(1)}`).join(" ") +
-        ` L${x(n - 1).toFixed(1)},${H} Z`;
-  const labels = n === 0 ? [] : [series[0], series[Math.floor((n - 1) / 2)], series[n - 1]];
-  return (
-    <div className="mt-5">
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-28 w-full" role="img" aria-label="사용량 추이">
-        <defs>
-          <linearGradient id="usageFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.20" />
-            <stop offset="100%" stopColor="var(--primary)" stopOpacity="0.02" />
-          </linearGradient>
-        </defs>
-        {n > 0 && <path d={area} fill="url(#usageFill)" />}
-        {n > 0 && (
-          <path
-            d={line}
-            fill="none"
-            stroke="var(--primary)"
-            strokeWidth={2}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
-        )}
-      </svg>
-      {labels.length > 0 && (
-        <div className="mt-1.5 flex justify-between font-mono text-[10px] tabular-nums text-muted-foreground/60">
-          <span>{labels[0].label}</span>
-          <span>{labels[1].label}</span>
-          <span>{labels[2].label}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// 분기 분포 도넛(SVG). stroke-dasharray 로 세 분기를 그린다(출처색).
-function Donut({ stats }: { stats: QueryLogStats }) {
-  const size = 108;
-  const c = size / 2;
-  const r = 42;
-  const sw = 13;
-  const C = 2 * Math.PI * r;
-  let acc = 0;
-  const arcs = (["regulation", "law", "out_of_scope"] as const)
-    .map((k) => {
-      const frac = stats.total ? stats.byRoute[k] / stats.total : 0;
-      const len = frac * C;
-      const off = -acc;
-      acc += len;
-      return { k, len, off, color: ROUTE_META[k].color };
-    })
-    .filter((a) => a.len > 0);
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0" role="img" aria-label="분기 분포">
-      <circle cx={c} cy={c} r={r} fill="none" stroke="var(--muted)" strokeWidth={sw} />
-      <g transform={`rotate(-90 ${c} ${c})`}>
-        {arcs.map((a) => (
-          <circle
-            key={a.k}
-            cx={c}
-            cy={c}
-            r={r}
-            fill="none"
-            stroke={a.color}
-            strokeWidth={sw}
-            strokeDasharray={`${a.len.toFixed(2)} ${(C - a.len).toFixed(2)}`}
-            strokeDashoffset={a.off.toFixed(2)}
-          />
-        ))}
-      </g>
-      <text x={c} y={c - 1} textAnchor="middle" className="fill-foreground font-serif" style={{ fontSize: 22 }}>
-        {stats.total.toLocaleString()}
-      </text>
-      <text x={c} y={c + 15} textAnchor="middle" className="fill-muted-foreground" style={{ fontSize: 10 }}>
-        질의
-      </text>
-    </svg>
-  );
-}
 
 function Kpi({
   label,
   value,
   note,
   critical,
+  meter,
+  meterColor,
 }: {
   label: string;
   value: string;
   note?: string;
   critical?: boolean;
+  meter?: number; // 0~100 비율. 있으면 미터 바를 그린다.
+  meterColor?: string;
 }) {
   return (
     <div className="border-border px-4 py-3.5 sm:border-l sm:first:border-l-0">
@@ -493,7 +364,18 @@ function Kpi({
       >
         {value}
       </div>
-      {note && <div className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground/70">{note}</div>}
+      {meter != null && (
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: `${Math.max(0, Math.min(100, meter))}%`,
+              background: meterColor ?? "var(--primary)",
+            }}
+          />
+        </div>
+      )}
+      {note && <div className="mt-1 font-mono text-[11px] tabular-nums text-muted-foreground/70">{note}</div>}
     </div>
   );
 }
