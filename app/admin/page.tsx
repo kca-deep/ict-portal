@@ -547,6 +547,15 @@ function DetailPanel({
         <Field label="게이트 충족">
           {detail.gate_sufficient == null ? "–" : detail.gate_sufficient ? "예" : "아니오"}
         </Field>
+        <Field label="피드백">
+          {detail.feedback === 1 ? (
+            <span className="font-semibold text-primary">👍 도움됨</span>
+          ) : detail.feedback === -1 ? (
+            <span className="font-semibold text-destructive">👎 아쉬움</span>
+          ) : (
+            "–"
+          )}
+        </Field>
         {detail.error_code && (
           <Field label="오류코드">
             <span className="font-mono text-destructive">{detail.error_code}</span>
@@ -565,6 +574,16 @@ function DetailPanel({
             {detail.answer ?? "–"}
           </p>
         </div>
+        {detail.feedback_note && (
+          <div>
+            <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              피드백 메모
+            </div>
+            <p className="mt-1 whitespace-pre-wrap text-[13.5px] leading-relaxed text-foreground/90">
+              {detail.feedback_note}
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
