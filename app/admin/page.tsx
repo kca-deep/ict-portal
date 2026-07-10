@@ -381,14 +381,24 @@ export default async function AdminPage({
 
         {/* 로그 표 — 초기 20건, "더 조회하기"로 20건씩 이어붙임(SPA) */}
         <LogTable
+          key={[period, route, hallucinationOnly, negativeOnly, ip, search, from, to, sort, sortDir]
+            .map((v) => v ?? "")
+            .join("|")}
           initialRows={rows}
           sp={{
             period,
             route,
             halluc: hallucinationOnly ? "1" : undefined,
+            neg: negativeOnly ? "1" : undefined,
             ip,
+            q: search,
+            from,
+            to,
+            sort,
+            dir: sortDir,
           }}
           since={filter.since}
+          until={filter.until}
           selectedId={selectedId}
         />
       </div>

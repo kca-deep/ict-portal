@@ -10,7 +10,18 @@ import type { QueryLogListItem } from "@/lib/db/query-log";
 
 const PAGE = 10;
 
-type Sp = { period?: string; route?: string; halluc?: string; ip?: string };
+type Sp = {
+  period?: string;
+  route?: string;
+  halluc?: string;
+  neg?: string;
+  ip?: string;
+  q?: string;
+  from?: string;
+  to?: string;
+  sort?: string;
+  dir?: string;
+};
 
 const ROUTE_META = {
   regulation: { label: "규정", color: "var(--badge-regulation)" },
@@ -35,7 +46,13 @@ function href(sp: Sp, patch: Record<string, string | undefined>) {
     period: sp.period,
     route: sp.route,
     halluc: sp.halluc,
+    neg: sp.neg,
     ip: sp.ip,
+    q: sp.q,
+    from: sp.from,
+    to: sp.to,
+    sort: sp.sort,
+    dir: sp.dir,
     ...patch,
   };
   const p = new URLSearchParams();
@@ -55,15 +72,47 @@ function RoutePill({ route }: { route: "regulation" | "law" | "out_of_scope" }) 
   );
 }
 
+// 정렬 가능한 열헤더. 활성 컬럼이면 방향(↓/↑)을 보이고 클릭 시 토글, 아니면 desc 로 시작.
+// 기본 정렬은 created_at desc 이라 sort 미지정 시 '시각' 이 활성으로 간주된다.
+function SortTh({
+  sp,
+  col,
+  label,
+  align,
+}: {
+  sp: Sp;
+  col: "created_at" | "top_score" | "total_ms" | "tokens";
+  label: string;
+  align: "left" | "right";
+}) {
+  const active = sp.sort === col || (!sp.sort && col === "created_at");
+  const dir = active ? (sp.dir === "asc" ? "asc" : "desc") : "desc";
+  const nextDir = active && dir === "desc" ? "asc" : "desc";
+  const arrow = active ? (dir === "desc" ? " ↓" : " ↑") : "";
+  return (
+    <th className={`px-4 py-2.5 font-medium ${align === "right" ? "text-right" : "text-left"}`}>
+      <Link
+        href={href(sp, { sort: col, dir: nextDir, log: undefined })}
+        className={`transition hover:text-foreground ${active ? "text-foreground" : ""}`}
+      >
+        {label}
+        <span className="tabular-nums">{arrow}</span>
+      </Link>
+    </th>
+  );
+}
+
 export function LogTable({
   initialRows,
   sp,
   since,
+  until,
   selectedId,
 }: {
   initialRows: QueryLogListItem[];
   sp: Sp;
   since?: string;
+  until?: string;
   selectedId?: number;
 }) {
   const [rows, setRows] = useState<QueryLogListItem[]>(initialRows);
@@ -80,8 +129,13 @@ export function LogTable({
       p.set("offset", String(rows.length));
       if (sp.route) p.set("route", sp.route);
       if (sp.halluc) p.set("halluc", sp.halluc);
+      if (sp.neg) p.set("neg", sp.neg);
       if (sp.ip) p.set("ip", sp.ip);
+      if (sp.q) p.set("search", sp.q);
+      if (sp.sort) p.set("sort", sp.sort);
+      if (sp.dir) p.set("dir", sp.dir);
       if (since) p.set("since", since);
+      if (until) p.set("until", until);
       const res = await fetch(`/api/admin/logs?${p.toString()}`);
       if (!res.ok) throw new Error(String(res.status));
       const data = (await res.json()) as { rows: QueryLogListItem[] };
@@ -97,23 +151,24 @@ export function LogTable({
   return (
     <>
       <section className="mt-6 overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
-        <table className="w-full min-w-[880px] border-collapse text-[13px]">
+        <table className="w-full min-w-[940px] border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
-              <th className="px-4 py-2.5 text-left font-medium">시각</th>
+              <SortTh sp={sp} col="created_at" label="시각" align="left" />
               <th className="px-4 py-2.5 text-left font-medium">IP</th>
               <th className="px-4 py-2.5 text-left font-medium">질문</th>
               <th className="px-4 py-2.5 text-left font-medium">분기</th>
-              <th className="px-4 py-2.5 text-right font-medium">관련도</th>
+              <SortTh sp={sp} col="top_score" label="관련도" align="right" />
               <th className="px-4 py-2.5 text-center font-medium">환각</th>
-              <th className="px-4 py-2.5 text-right font-medium">응답</th>
-              <th className="px-4 py-2.5 text-right font-medium">토큰</th>
+              <th className="px-4 py-2.5 text-center font-medium">피드백</th>
+              <SortTh sp={sp} col="total_ms" label="응답" align="right" />
+              <SortTh sp={sp} col="tokens" label="토큰" align="right" />
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-14 text-center text-muted-foreground">
+                <td colSpan={9} className="px-4 py-14 text-center text-muted-foreground">
                   조건에 맞는 로그가 없습니다.
                 </td>
               </tr>
@@ -159,6 +214,15 @@ export function LogTable({
                     >
                       환각
                     </span>
+                  ) : (
+                    <span className="text-muted-foreground/30">·</span>
+                  )}
+                </td>
+                <td className="whitespace-nowrap px-4 py-2.5 text-center">
+                  {r.feedback === 1 ? (
+                    <span title="도움됨">👍</span>
+                  ) : r.feedback === -1 ? (
+                    <span title="아쉬움">👎</span>
                   ) : (
                     <span className="text-muted-foreground/30">·</span>
                   )}
