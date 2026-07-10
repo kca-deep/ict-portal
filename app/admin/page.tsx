@@ -226,7 +226,7 @@ export default async function AdminPage({
           </div>
 
           {/* 품질 스트립: 평균 응답시간 → 환각률 → 인용 검증률 → 오류율 */}
-          <div className="grid grid-cols-2 border-t border-border bg-muted/40 sm:grid-cols-4">
+          <div className="grid grid-cols-2 border-t border-border bg-muted/40 sm:grid-cols-5">
             <Kpi label="평균 응답시간" value={fmtDur(stats.avgTotalMs)} note={`첫토큰 ${fmtDur(stats.avgTtftMs)}`} />
             <Kpi
               label="환각률"
@@ -250,6 +250,13 @@ export default async function AdminPage({
               critical={stats.errorCount > 0}
               meter={pctNum(stats.errorCount, stats.total)}
               meterColor="var(--destructive)"
+            />
+            <Kpi
+              label="만족도"
+              value={stats.ratedCount ? `👍 ${pct(stats.positiveCount, stats.ratedCount)}` : "–"}
+              note={`${stats.positiveCount.toLocaleString()}/${stats.ratedCount.toLocaleString()}`}
+              meter={pctNum(stats.positiveCount, stats.ratedCount)}
+              meterColor="var(--primary)"
             />
           </div>
         </section>
