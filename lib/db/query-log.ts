@@ -61,14 +61,59 @@ export async function logQuery(row: QueryLogRow): Promise<number | null> {
 // 이 함수들은 서버(서버 컴포넌트/route handler)에서만 호출한다. service_role 키가
 // 브라우저로 나가면 안 되므로 클라이언트 컴포넌트에서 import 하지 않는다.
 
+export type SortKey = "created_at" | "top_score" | "total_ms" | "tokens" | "feedback";
+
 export type QueryLogFilter = {
   limit?: number;
   offset?: number; // 페이징 시작 위치. 지정 시 range(offset, offset+limit-1) 로 조회.
   route?: "regulation" | "law" | "out_of_scope";
   hallucinationOnly?: boolean;
+  negativeOnly?: boolean; // feedback = -1 (👎) 만
   ip?: string;
   since?: string; // ISO timestamp — created_at >= since
+  until?: string; // ISO timestamp — created_at <= until
+  search?: string; // query|answer 부분일치(ilike)
+  sort?: SortKey; // 정렬 컬럼(화이트리스트). 기본 created_at
+  sortDir?: "asc" | "desc"; // 기본 desc
 };
+
+// 정렬 화이트리스트 — 키 → 실제 컬럼. tokens 는 합계 컬럼이 없어 tokens_in 으로 근사.
+const SORT_COLUMN: Record<SortKey, string> = {
+  created_at: "created_at",
+  top_score: "top_score",
+  total_ms: "total_ms",
+  tokens: "tokens_in",
+  feedback: "feedback",
+};
+
+// PostgREST or() 는 콤마·괄호로 필터를 구분하고 ilike 는 %/_ 가 와일드카드다.
+// 검색어의 구조문자는 공백으로, 와일드카드는 백슬래시로 중화해 주입을 막는다(PoC 수준).
+function escapeSearch(s: string): string {
+  return s.replace(/[%_]/g, "\\$&").replace(/[(),]/g, " ").trim();
+}
+
+// where 절(모집단 한정)만 공통으로 적용한다. select 컬럼·정렬·limit 은 호출부가 소유.
+// 구조 타이핑으로 빌더 종류에 무관하게 체이닝(반환 타입 T 유지) — supabase 빌더가 만족.
+type FilterableQuery<T> = {
+  eq(column: string, value: unknown): T;
+  gte(column: string, value: unknown): T;
+  lte(column: string, value: unknown): T;
+  or(filters: string): T;
+};
+
+function applyFilter<T extends FilterableQuery<T>>(q: T, filter: QueryLogFilter): T {
+  if (filter.route) q = q.eq("route", filter.route);
+  if (filter.hallucinationOnly) q = q.eq("has_hallucination", true);
+  if (filter.negativeOnly) q = q.eq("feedback", -1);
+  if (filter.ip) q = q.eq("ip", filter.ip);
+  if (filter.since) q = q.gte("created_at", filter.since);
+  if (filter.until) q = q.lte("created_at", filter.until);
+  if (filter.search) {
+    const kw = escapeSearch(filter.search);
+    if (kw) q = q.or(`query.ilike.%${kw}%,answer.ilike.%${kw}%`);
+  }
+  return q;
+}
 
 /** 로그 표 한 행(요약 컬럼만). */
 export type QueryLogListItem = {
@@ -84,6 +129,7 @@ export type QueryLogListItem = {
   tokens_in: number | null;
   tokens_out: number | null;
   message_count: number | null;
+  feedback: number | null;
 };
 
 /** 상세 보기 한 행(전문·인용 verdict 등 전체). */
@@ -105,25 +151,26 @@ export type QueryLogDetail = QueryLogListItem & {
   rerank_ms: number | null;
   llm_ms: number | null;
   error_code: string | null;
+  feedback: number | null;
+  feedback_note: string | null;
 };
 
 const LIST_COLUMNS =
-  "id, created_at, ip, query, route, top_score, has_hallucination, total_ms, ttft_ms, tokens_in, tokens_out, message_count";
+  "id, created_at, ip, query, route, top_score, has_hallucination, total_ms, ttft_ms, tokens_in, tokens_out, message_count, feedback";
 
 /** 최근 로그 목록(필터·최대 건수 적용). 기본 100건. */
 export async function listQueryLogs(
   filter: QueryLogFilter = {},
 ): Promise<QueryLogListItem[]> {
   const limit = filter.limit ?? 100;
+  const sortCol = SORT_COLUMN[filter.sort ?? "created_at"];
+  const ascending = filter.sortDir === "asc";
+
   let q = getSupabaseAdmin()
     .from("query_log")
     .select(LIST_COLUMNS)
-    .order("created_at", { ascending: false });
-
-  if (filter.route) q = q.eq("route", filter.route);
-  if (filter.hallucinationOnly) q = q.eq("has_hallucination", true);
-  if (filter.ip) q = q.eq("ip", filter.ip);
-  if (filter.since) q = q.gte("created_at", filter.since);
+    .order(sortCol, { ascending });
+  q = applyFilter(q, filter);
 
   // offset 이 있으면 range(페이징), 없으면 상위 limit 건.
   q =
@@ -156,6 +203,8 @@ export type QueryLogStats = {
   citationCount: number; // 인용 총 개수(검증 대상)
   citationVerifiedCount: number; // 그중 인용 검증 통과 개수
   errorCount: number; // error_code 가 있는 요청 수
+  positiveCount: number; // 👍(+1) 수
+  ratedCount: number; // 평가된(👍/👎) 수 = 만족도 분모
   avgTotalMs: number | null;
   avgTtftMs: number | null;
   series: { label: string; count: number }[]; // 사용량 추이(시간/일 버킷)
@@ -202,15 +251,11 @@ export async function queryLogStats(
   let q = getSupabaseAdmin()
     .from("query_log")
     .select(
-      "ip, created_at, route, has_hallucination, total_ms, ttft_ms, citation_count, citation_verified_count, error_code",
+      "ip, created_at, route, has_hallucination, total_ms, ttft_ms, citation_count, citation_verified_count, error_code, feedback",
     )
     .order("created_at", { ascending: false })
     .limit(STATS_ROW_CAP);
-
-  if (filter.route) q = q.eq("route", filter.route);
-  if (filter.hallucinationOnly) q = q.eq("has_hallucination", true);
-  if (filter.ip) q = q.eq("ip", filter.ip);
-  if (filter.since) q = q.gte("created_at", filter.since);
+  q = applyFilter(q, filter);
 
   const { data, error } = await q;
   if (error) throw new Error(`[query-log] stats failed: ${error.message}`);
@@ -225,6 +270,7 @@ export async function queryLogStats(
     citation_count: number | null;
     citation_verified_count: number | null;
     error_code: string | null;
+    feedback: number | null;
   }>;
 
   const byRoute = { regulation: 0, law: 0, out_of_scope: 0, unknown: 0 };
@@ -234,6 +280,8 @@ export async function queryLogStats(
   let citationCount = 0;
   let citationVerifiedCount = 0;
   let errorCount = 0;
+  let positiveCount = 0;
+  let ratedCount = 0;
   let totalMsSum = 0;
   let totalMsN = 0;
   let ttftMsSum = 0;
@@ -249,6 +297,12 @@ export async function queryLogStats(
     }
     if (r.has_hallucination) hallucinationCount += 1;
     if (r.error_code) errorCount += 1;
+    if (r.feedback === 1) {
+      positiveCount += 1;
+      ratedCount += 1;
+    } else if (r.feedback === -1) {
+      ratedCount += 1;
+    }
     citationCount += r.citation_count ?? 0;
     citationVerifiedCount += r.citation_verified_count ?? 0;
     if (typeof r.total_ms === "number") {
@@ -273,6 +327,8 @@ export async function queryLogStats(
     citationCount,
     citationVerifiedCount,
     errorCount,
+    positiveCount,
+    ratedCount,
     avgTotalMs: totalMsN ? Math.round(totalMsSum / totalMsN) : null,
     avgTtftMs: ttftMsN ? Math.round(ttftMsSum / ttftMsN) : null,
     series: buildUsageSeries(times, filter.since),
