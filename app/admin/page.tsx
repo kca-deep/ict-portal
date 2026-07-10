@@ -294,7 +294,7 @@ export default async function AdminPage({
 
         {/* 필터 */}
         <section className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px]">
-          <form method="get" action="/admin" className="flex w-full flex-wrap items-center gap-2">
+          <form method="get" action="/admin" className="flex flex-wrap items-center gap-2">
             {period && <input type="hidden" name="period" value={period} />}
             {route && <input type="hidden" name="route" value={route} />}
             {hallucinationOnly && <input type="hidden" name="halluc" value="1" />}
