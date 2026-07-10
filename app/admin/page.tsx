@@ -51,7 +51,13 @@ function href(sp: SearchParams, patch: Record<string, string | undefined>): stri
     period: first(sp.period),
     route: first(sp.route),
     halluc: first(sp.halluc),
+    neg: first(sp.neg),
     ip: first(sp.ip),
+    q: first(sp.q),
+    from: first(sp.from),
+    to: first(sp.to),
+    sort: first(sp.sort),
+    dir: first(sp.dir),
     log: first(sp.log),
     ...patch,
   };
@@ -97,12 +103,37 @@ export default async function AdminPage({
   const ip = first(sp.ip);
   const selectedId = first(sp.log) ? Number(first(sp.log)) : undefined;
 
+  const search = first(sp.q);
+  const from = first(sp.from); // YYYY-MM-DD
+  const to = first(sp.to);
+  const negativeOnly = first(sp.neg) === "1";
+  const sortParam = first(sp.sort);
+  const sort =
+    sortParam === "created_at" ||
+    sortParam === "top_score" ||
+    sortParam === "total_ms" ||
+    sortParam === "tokens" ||
+    sortParam === "feedback"
+      ? sortParam
+      : undefined;
+  const dirParam = first(sp.dir);
+  const sortDir = dirParam === "asc" ? "asc" : dirParam === "desc" ? "desc" : undefined;
+
+  // 커스텀 날짜가 있으면 프리셋보다 우선. to 는 그날 끝(23:59:59)까지 포함.
+  const since = from ? `${from}T00:00:00` : sinceFromPeriod(period);
+  const until = to ? `${to}T23:59:59` : undefined;
+
   const filter: QueryLogFilter = {
     limit: 10,
     route,
     hallucinationOnly,
+    negativeOnly,
     ip,
-    since: sinceFromPeriod(period),
+    since,
+    until,
+    search,
+    sort,
+    sortDir,
   };
 
   const [stats, rows, detail] = await Promise.all([
@@ -263,6 +294,41 @@ export default async function AdminPage({
 
         {/* 필터 */}
         <section className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px]">
+          <form method="get" action="/admin" className="flex w-full flex-wrap items-center gap-2">
+            {period && <input type="hidden" name="period" value={period} />}
+            {route && <input type="hidden" name="route" value={route} />}
+            {hallucinationOnly && <input type="hidden" name="halluc" value="1" />}
+            {negativeOnly && <input type="hidden" name="neg" value="1" />}
+            {ip && <input type="hidden" name="ip" value={ip} />}
+            {sort && <input type="hidden" name="sort" value={sort} />}
+            {sortDir && <input type="hidden" name="dir" value={sortDir} />}
+            <input
+              type="search"
+              name="q"
+              defaultValue={search ?? ""}
+              placeholder="질문·답변 검색"
+              className="w-56 rounded-md border border-border bg-card px-3 py-1.5 text-[13px] outline-none focus:border-primary"
+            />
+            <input
+              type="date"
+              name="from"
+              defaultValue={from ?? ""}
+              className="rounded-md border border-border bg-card px-2.5 py-1.5 text-[13px] text-muted-foreground outline-none focus:border-primary"
+            />
+            <span className="text-muted-foreground/60">~</span>
+            <input
+              type="date"
+              name="to"
+              defaultValue={to ?? ""}
+              className="rounded-md border border-border bg-card px-2.5 py-1.5 text-[13px] text-muted-foreground outline-none focus:border-primary"
+            />
+            <button
+              type="submit"
+              className="rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition hover:opacity-90"
+            >
+              조회
+            </button>
+          </form>
           <div className="flex items-center gap-1">
             <span className="mr-1 text-xs text-muted-foreground/70">분기</span>
             {routeChips.map(([label, value]) => {
@@ -289,6 +355,16 @@ export default async function AdminPage({
             }`}
           >
             환각만
+          </Link>
+          <Link
+            href={href(sp, { neg: negativeOnly ? undefined : "1", log: undefined })}
+            className={`rounded-md px-2.5 py-1 transition ${
+              negativeOnly
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            👎만
           </Link>
           {ip && (
             <Link
