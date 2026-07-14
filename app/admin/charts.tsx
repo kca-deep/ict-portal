@@ -83,6 +83,7 @@ export function UsageChart({ data }: { data: { label: string; count: number }[] 
 // 분기 분포. 색은 라우트(엔티티)에 고정. 미분류(unknown)까지 포함해 합=total.
 // unknown 색은 admin/page.tsx 의 UNKNOWN_META.color 와 반드시 동일해야 범례와 일치.
 const routeConfig = {
+  unified: { label: "통합", color: "oklch(0.55 0.11 170)" },
   regulation: { label: "규정", color: "var(--badge-regulation)" },
   law: { label: "법령", color: "var(--badge-law)" },
   out_of_scope: { label: "범위밖", color: "var(--muted-foreground)" },

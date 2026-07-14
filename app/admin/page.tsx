@@ -19,9 +19,12 @@ export const dynamic = "force-dynamic";
 type SearchParams = { [key: string]: string | string[] | undefined };
 
 const ROUTE_META: Record<
-  "regulation" | "law" | "out_of_scope",
+  "unified" | "regulation" | "law" | "out_of_scope",
   { label: string; color: string }
 > = {
+  // 통합 검색(2026-07 개편 이후 기본 라우트). 규정 블루·법령 앰버와 구분되는 틸.
+  unified: { label: "통합", color: "oklch(0.55 0.11 170)" },
+  // regulation/law 는 개편 전 레거시 행 표시용.
   regulation: { label: "규정", color: "var(--badge-regulation)" },
   law: { label: "법령", color: "var(--badge-law)" },
   out_of_scope: { label: "범위밖", color: "var(--muted-foreground)" },
@@ -96,7 +99,10 @@ export default async function AdminPage({
   const period = first(sp.period);
   const routeParam = first(sp.route);
   const route =
-    routeParam === "regulation" || routeParam === "law" || routeParam === "out_of_scope"
+    routeParam === "unified" ||
+    routeParam === "regulation" ||
+    routeParam === "law" ||
+    routeParam === "out_of_scope"
       ? routeParam
       : undefined;
   const hallucinationOnly = first(sp.halluc) === "1";
@@ -151,6 +157,7 @@ export default async function AdminPage({
   ];
   const routeChips: Array<[string, string | undefined]> = [
     ["전체", undefined],
+    ["통합", "unified"],
     ["규정", "regulation"],
     ["법령", "law"],
     ["범위밖", "out_of_scope"],
@@ -158,6 +165,7 @@ export default async function AdminPage({
   const periodLabel = period === "24h" ? "최근 24시간" : period === "7d" ? "최근 7일" : "전체 기간";
   // 도넛 데이터(미분류 포함 → 합 = total). 색은 charts.tsx routeConfig 가 소유.
   const donutData = [
+    { route: "unified" as const, count: stats.byRoute.unified },
     { route: "regulation" as const, count: stats.byRoute.regulation },
     { route: "law" as const, count: stats.byRoute.law },
     { route: "out_of_scope" as const, count: stats.byRoute.out_of_scope },
@@ -230,6 +238,7 @@ export default async function AdminPage({
                 <RouteDonut data={donutData} total={stats.total} />
                 <div className="flex flex-col gap-2.5 text-[13px]">
                   {[
+                    { label: ROUTE_META.unified.label, color: ROUTE_META.unified.color, count: stats.byRoute.unified },
                     { label: ROUTE_META.regulation.label, color: ROUTE_META.regulation.color, count: stats.byRoute.regulation },
                     { label: ROUTE_META.law.label, color: ROUTE_META.law.color, count: stats.byRoute.law },
                     { label: ROUTE_META.out_of_scope.label, color: ROUTE_META.out_of_scope.color, count: stats.byRoute.out_of_scope },
@@ -473,7 +482,7 @@ function Kpi({
   );
 }
 
-function RoutePill({ route }: { route: "regulation" | "law" | "out_of_scope" }) {
+function RoutePill({ route }: { route: "unified" | "regulation" | "law" | "out_of_scope" }) {
   const m = ROUTE_META[route];
   return (
     <span
@@ -598,6 +607,12 @@ function DetailPanel({
             법령 참조 (law_refs)
           </div>
           <Json value={detail.law_refs} />
+        </div>
+        <div>
+          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            의도 분해 (intents)
+          </div>
+          <Json value={detail.intents} />
         </div>
         <div>
           <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">

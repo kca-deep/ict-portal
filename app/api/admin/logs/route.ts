@@ -21,7 +21,10 @@ export async function GET(req: NextRequest) {
   const offset = Math.max(0, Math.trunc(Number(sp.get("offset")) || 0));
   const routeParam = sp.get("route");
   const route =
-    routeParam === "regulation" || routeParam === "law" || routeParam === "out_of_scope"
+    routeParam === "unified" ||
+    routeParam === "regulation" ||
+    routeParam === "law" ||
+    routeParam === "out_of_scope"
       ? routeParam
       : undefined;
 

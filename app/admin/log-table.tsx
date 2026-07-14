@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { QueryLogListItem } from "@/lib/db/query-log";
 
-// query_log 표(클라이언트). 초기 20건은 서버가 렌더해 넘기고, "더 조회하기"를 누르면
-// /api/admin/logs 에서 다음 20건을 받아 하단에 이어붙인다(SPA, 전체 리로드 없음).
+// query_log 표(클라이언트). 초기 10건은 서버가 렌더해 넘기고, 스크롤이 표 하단에
+// 닿으면 /api/admin/logs 에서 다음 10건을 받아 이어붙인다(무한 스크롤, 전체 리로드 없음).
 // 서버로 넘어오는 건 요약 행뿐 — service_role 은 서버에만 있다.
 
 const PAGE = 10;
@@ -24,6 +24,7 @@ type Sp = {
 };
 
 const ROUTE_META = {
+  unified: { label: "통합", color: "oklch(0.55 0.11 170)" },
   regulation: { label: "규정", color: "var(--badge-regulation)" },
   law: { label: "법령", color: "var(--badge-law)" },
   out_of_scope: { label: "범위밖", color: "var(--muted-foreground)" },
@@ -60,7 +61,7 @@ function href(sp: Sp, patch: Record<string, string | undefined>) {
   const qs = p.toString();
   return qs ? `/admin?${qs}` : "/admin";
 }
-function RoutePill({ route }: { route: "regulation" | "law" | "out_of_scope" }) {
+function RoutePill({ route }: { route: "unified" | "regulation" | "law" | "out_of_scope" }) {
   const m = ROUTE_META[route];
   return (
     <span
@@ -119,9 +120,15 @@ export function LogTable({
   const [hasMore, setHasMore] = useState(initialRows.length === PAGE);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  // 무한 스크롤 감시 지점(표 하단). 뷰포트에 들어오면 다음 페이지를 자동 조회한다.
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // IntersectionObserver 콜백은 렌더 사이클 밖에서 연속 발화할 수 있어,
+  // state(loading)와 별개로 동기 가드를 둬 중복 fetch 를 막는다.
+  const loadingRef = useRef(false);
 
   async function loadMore() {
-    if (loading) return;
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setLoading(true);
     setError(false);
     try {
@@ -144,9 +151,28 @@ export function LogTable({
     } catch {
       setError(true);
     } finally {
+      loadingRef.current = false;
       setLoading(false);
     }
   }
+
+  // 하단 감시 지점이 보이면 자동 추가 조회(무한 스크롤). rootMargin 으로 바닥에
+  // 닿기 한 화면쯤 전에 미리 당겨와 끊김을 줄인다. 실패(error) 시에는 관찰을
+  // 멈추고 가운데의 '다시 시도'로만 재개해 실패 루프를 방지한다.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || !hasMore || error) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) void loadMore();
+      },
+      { rootMargin: "240px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+    // loadMore 는 렌더마다 새 함수지만 loadingRef 가드로 중복 호출이 없어 deps 에서 제외.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasMore, error, rows.length]);
 
   return (
     <>
@@ -239,20 +265,32 @@ export function LogTable({
         </table>
       </section>
 
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground/70">
-          {rows.length.toLocaleString()}건 표시
-          {error && <span className="ml-2 text-destructive">불러오기 실패 — 다시 시도하세요.</span>}
-        </p>
-        {hasMore && (
+      {/* 무한 스크롤 푸터 — 상태 표시는 가운데 정렬. 스크롤이 하단(sentinel)에
+          닿으면 자동으로 다음 페이지를 당겨온다(더보기 버튼 없음). */}
+      <div ref={sentinelRef} className="mt-3 flex flex-col items-center gap-1.5 py-3">
+        {loading ? (
+          <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+            <span
+              className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-[2px] border-border border-t-primary"
+              aria-hidden
+            />
+            불러오는 중…
+          </span>
+        ) : error ? (
           <button
             onClick={loadMore}
-            disabled={loading}
-            className="rounded-md border border-border bg-card px-4 py-1.5 text-[13px] font-medium text-foreground shadow-sm transition hover:bg-muted disabled:opacity-50"
+            className="rounded-md border border-border bg-card px-4 py-1.5 text-[13px] font-medium text-destructive shadow-sm transition hover:bg-muted"
           >
-            {loading ? "불러오는 중…" : "더보기"}
+            불러오기 실패 — 다시 시도
           </button>
+        ) : hasMore ? (
+          <span className="text-[11px] text-muted-foreground/50">아래로 스크롤하면 더 조회됩니다</span>
+        ) : (
+          rows.length > 0 && (
+            <span className="text-[11px] text-muted-foreground/50">·</span>
+          )
         )}
+        <p className="text-xs text-muted-foreground/70">{rows.length.toLocaleString()}건 표시</p>
       </div>
     </>
   );
