@@ -405,7 +405,7 @@ export default function Home() {
         {/* Header — 하단 구분선을 전체 가로 폭으로 표시, 내용만 채팅 컬럼에 정렬 */}
         <header className="shrink-0 border-b-2 border-b-primary/25 bg-background/80 backdrop-blur-sm">
           <div
-            className={`flex items-center justify-between px-6 py-2 ${
+            className={`flex items-center justify-between px-6 py-3 ${
               activeSource ? "" : "max-w-3xl mx-auto"
             }`}
           >
@@ -414,7 +414,7 @@ export default function Home() {
               viewBox="10 78 380 292"
               role="img"
               aria-label="PIMS 어드바이저 로고"
-              className="h-12 w-[62px] shrink-0"
+              className="h-14 w-[72px] shrink-0"
             >
               <defs>
                 <linearGradient id="pimsAppSky" x1="0" y1="0" x2="1" y2="1">
@@ -453,14 +453,14 @@ export default function Home() {
                 <tspan fontSize="100" fill="#2a7df0">IMS</tspan>
               </text>
             </svg>
-            <div className="flex flex-col justify-center h-11">
+            <div className="flex flex-col justify-center h-14">
               <h1
-                className="text-lg font-bold leading-tight tracking-tight text-foreground"
+                className="text-xl font-bold leading-tight tracking-tight text-foreground"
                 style={{ fontFamily: "var(--font-display)" }}
               >
                 AI Advisor
               </h1>
-              <p className="text-xs text-muted-foreground leading-tight">
+              <p className="text-base text-muted-foreground leading-tight">
                 ICT기금 규정·지침·법령 안내
               </p>
             </div>
