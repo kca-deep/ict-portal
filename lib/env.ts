@@ -15,6 +15,11 @@ const envSchema = z.object({
     .url()
     .default("https://www.law.go.kr/DRF/lawSearch.do"),
 
+  // 공공데이터포털 한국천문연구원 특일 정보(getRestDeInfo) 디코딩 서비스키.
+  // 관리자 대시보드의 "쉬는 날 사용" 지표(공휴일·대체·선거일 포함) 판정용. 선택 —
+  // 미설정 시 주말만 쉬는 날로 폴백(공휴일 미반영).
+  DATA_GO_KR_API_KEY: z.string().optional(),
+
   LLM_MODEL: z.string().default("claude-sonnet-4-6"),
 
   // 의도 분해 게이트 전용 소형 모델 — 답변 LLM(LLM_MODEL, Sonnet 단독)과 분리.

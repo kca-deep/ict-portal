@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { QueryLogListItem } from "@/lib/db/query-log";
 
-// query_log 표(클라이언트). 초기 10건은 서버가 렌더해 넘기고, 스크롤이 표 하단에
-// 닿으면 /api/admin/logs 에서 다음 10건을 받아 이어붙인다(무한 스크롤, 전체 리로드 없음).
-// 서버로 넘어오는 건 요약 행뿐 — service_role 은 서버에만 있다.
+// query_log 표(클라이언트). 초기 한 페이지(기본 20건)는 서버가 렌더해 넘기고, 페이지 이동·
+// 페이지 크기 변경 시 /api/admin/logs 에서 해당 구간을 offset/limit 로 받아 교체한다.
+// service_role 은 서버에만 있으므로 넘어오는 건 요약 행뿐. total(필터 내 총건수)로 페이지 수 산출.
 
-const PAGE = 10;
+const PAGE_SIZES = [20, 50, 100, 200, 300] as const;
+const DEFAULT_SIZE = 20;
 
 type Sp = {
   period?: string;
@@ -30,18 +31,51 @@ const ROUTE_META = {
   out_of_scope: { label: "범위밖", color: "var(--muted-foreground)" },
 } as const;
 
+// 시간대 배지 — 성과지표(쉬는 날·평일 저녁·심야)와 같은 잣대. 주말/공휴일/평일심야 3종,
+// 업무시간 내(평일 09~18시)는 배지 없이 하이픈. 색은 route·환각과 겹치지 않게 선택.
+const DAY_KIND_META = {
+  weekend: { label: "주말", color: "oklch(0.55 0.14 305)" },
+  holiday: { label: "휴일", color: "oklch(0.58 0.16 350)" },
+  night: { label: "심야", color: "oklch(0.52 0.07 262)" },
+} as const;
+type DayKind = keyof typeof DAY_KIND_META;
+
 function tint(color: string, amount = 14) {
   return `color-mix(in oklch, ${color} ${amount}%, transparent)`;
 }
 function fmtDur(ms: number | null) {
   return ms == null ? "–" : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 }
-function fmtScore(v: number | null) {
-  return v == null ? "–" : v.toFixed(3);
+
+// created_at(UTC 저장)을 KST(UTC+9)로 환산해 "YY-MM-DD. HH:MM"(24시간제)로 표기.
+// +9h 후 getUTC* 를 읽어 서버(UTC)·클라이언트(KST) 어디서 렌더해도 동일 문자열 → 하이드레이션
+// 불일치 없음.
+function kstShift(iso: string) {
+  return new Date(new Date(iso).getTime() + 9 * 3600 * 1000);
 }
 function fmtTime(iso: string) {
-  return new Date(iso).toLocaleString("ko-KR", { hour12: false });
+  const d = kstShift(iso);
+  const yy = String(d.getUTCFullYear()).slice(2);
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mi = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}. ${hh}:${mi}`;
 }
+
+// 시간대 분류(KST). 주말·공휴일 = 쉬는 날(하루 전체), 그 밖 평일 18~06시 = 심야.
+// 평일 주간(비휴일 09~18, 06~09 포함)은 null → 하이픈. 성과지표 버킷과 동일 규칙.
+function dayKindOf(iso: string, holidays: Set<string>): DayKind | null {
+  const d = kstShift(iso);
+  const day = d.getUTCDay();
+  const hour = d.getUTCHours();
+  const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  if (day === 0 || day === 6) return "weekend";
+  if (holidays.has(key)) return "holiday";
+  if (hour >= 18 || hour < 6) return "night";
+  return null;
+}
+
 function href(sp: Sp, patch: Record<string, string | undefined>) {
   const merged: Record<string, string | undefined> = {
     period: sp.period,
@@ -66,6 +100,17 @@ function RoutePill({ route }: { route: "unified" | "regulation" | "law" | "out_o
   return (
     <span
       className="inline-block rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold"
+      style={{ color: m.color, background: tint(m.color) }}
+    >
+      {m.label}
+    </span>
+  );
+}
+function DayKindPill({ kind }: { kind: DayKind }) {
+  const m = DAY_KIND_META[kind];
+  return (
+    <span
+      className="inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold"
       style={{ color: m.color, background: tint(m.color) }}
     >
       {m.label}
@@ -105,74 +150,91 @@ function SortTh({
 
 export function LogTable({
   initialRows,
+  total,
+  holidays,
   sp,
   since,
   until,
   selectedId,
 }: {
   initialRows: QueryLogListItem[];
+  total: number;
+  holidays: string[];
   sp: Sp;
   since?: string;
   until?: string;
   selectedId?: number;
 }) {
   const [rows, setRows] = useState<QueryLogListItem[]>(initialRows);
-  const [hasMore, setHasMore] = useState(initialRows.length === PAGE);
+  const [page, setPage] = useState(0); // 0-indexed
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_SIZE);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
-  // 무한 스크롤 감시 지점(표 하단). 뷰포트에 들어오면 다음 페이지를 자동 조회한다.
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  // IntersectionObserver 콜백은 렌더 사이클 밖에서 연속 발화할 수 있어,
-  // state(loading)와 별개로 동기 가드를 둬 중복 fetch 를 막는다.
-  const loadingRef = useRef(false);
 
-  async function loadMore() {
-    if (loadingRef.current) return;
-    loadingRef.current = true;
-    setLoading(true);
-    setError(false);
-    try {
-      const p = new URLSearchParams();
-      p.set("offset", String(rows.length));
-      if (sp.route) p.set("route", sp.route);
-      if (sp.halluc) p.set("halluc", sp.halluc);
-      if (sp.neg) p.set("neg", sp.neg);
-      if (sp.ip) p.set("ip", sp.ip);
-      if (sp.q) p.set("search", sp.q);
-      if (sp.sort) p.set("sort", sp.sort);
-      if (sp.dir) p.set("dir", sp.dir);
-      if (since) p.set("since", since);
-      if (until) p.set("until", until);
-      const res = await fetch(`/api/admin/logs?${p.toString()}`);
-      if (!res.ok) throw new Error(String(res.status));
-      const data = (await res.json()) as { rows: QueryLogListItem[] };
-      setRows((prev) => [...prev, ...data.rows]);
-      setHasMore(data.rows.length === PAGE);
-    } catch {
-      setError(true);
-    } finally {
-      loadingRef.current = false;
-      setLoading(false);
+  const holidaySet = useMemo(() => new Set(holidays), [holidays]);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const offset = page * pageSize;
+
+  // page/pageSize 변경 시에만 서버에서 해당 구간을 당겨온다. 첫 마운트(page 0·기본 크기)는
+  // 서버가 준 initialRows 를 그대로 쓰므로 skip(불필요한 재조회 방지). 필터가 바뀌면 부모가
+  // key 로 이 컴포넌트를 remount → 상태가 초기값으로 리셋된다.
+  const didMount = useRef(false);
+  useEffect(() => {
+    if (!didMount.current) {
+      didMount.current = true;
+      return;
     }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(false);
+      try {
+        const p = new URLSearchParams();
+        p.set("offset", String(page * pageSize));
+        p.set("limit", String(pageSize));
+        if (sp.route) p.set("route", sp.route);
+        if (sp.halluc) p.set("halluc", sp.halluc);
+        if (sp.neg) p.set("neg", sp.neg);
+        if (sp.ip) p.set("ip", sp.ip);
+        if (sp.q) p.set("search", sp.q);
+        if (sp.sort) p.set("sort", sp.sort);
+        if (sp.dir) p.set("dir", sp.dir);
+        if (since) p.set("since", since);
+        if (until) p.set("until", until);
+        const res = await fetch(`/api/admin/logs?${p.toString()}`);
+        if (!res.ok) throw new Error(String(res.status));
+        const data = (await res.json()) as { rows: QueryLogListItem[] };
+        if (!cancelled) setRows(data.rows);
+      } catch {
+        if (!cancelled) setError(true);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // sp/since/until 은 remount 로 고정이므로 deps 에서 제외(page·pageSize 만 관찰).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize]);
+
+  function changeSize(n: number) {
+    if (n === pageSize) return;
+    setPageSize(n);
+    setPage(0);
   }
 
-  // 하단 감시 지점이 보이면 자동 추가 조회(무한 스크롤). rootMargin 으로 바닥에
-  // 닿기 한 화면쯤 전에 미리 당겨와 끊김을 줄인다. 실패(error) 시에는 관찰을
-  // 멈추고 가운데의 '다시 시도'로만 재개해 실패 루프를 방지한다.
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el || !hasMore || error) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) void loadMore();
-      },
-      { rootMargin: "240px 0px" },
-    );
-    io.observe(el);
-    return () => io.disconnect();
-    // loadMore 는 렌더마다 새 함수지만 loadingRef 가드로 중복 호출이 없어 deps 에서 제외.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasMore, error, rows.length]);
+  const rangeText =
+    total === 0
+      ? "0건"
+      : `${(offset + 1).toLocaleString()}–${(offset + rows.length).toLocaleString()} / ${total.toLocaleString()}건`;
+
+  const chip = (on: boolean) =>
+    `rounded-md px-2.5 py-1 text-[13px] transition ${
+      on ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+    }`;
+  const navBtn =
+    "rounded-md border border-border bg-card px-2.5 py-1 text-[13px] text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40";
 
   return (
     <>
@@ -184,7 +246,7 @@ export function LogTable({
               <th className="px-4 py-2.5 text-left font-medium">IP</th>
               <th className="px-4 py-2.5 text-left font-medium">질문</th>
               <th className="px-4 py-2.5 text-left font-medium">분기</th>
-              <SortTh sp={sp} col="top_score" label="관련도" align="right" />
+              <th className="px-4 py-2.5 text-center font-medium">시간대</th>
               <th className="px-4 py-2.5 text-center font-medium">환각</th>
               <th className="px-4 py-2.5 text-center font-medium">피드백</th>
               <SortTh sp={sp} col="total_ms" label="응답" align="right" />
@@ -195,102 +257,114 @@ export function LogTable({
             {rows.length === 0 && (
               <tr>
                 <td colSpan={9} className="px-4 py-14 text-center text-muted-foreground">
-                  조건에 맞는 로그가 없습니다.
+                  {loading ? "불러오는 중…" : "조건에 맞는 로그가 없습니다."}
                 </td>
               </tr>
             )}
-            {rows.map((r) => (
-              <tr
-                key={r.id}
-                className={`border-b border-border/60 transition last:border-0 hover:bg-muted/50 ${
-                  selectedId === r.id ? "bg-accent" : ""
-                }`}
-              >
-                <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs tabular-nums text-muted-foreground">
-                  {fmtTime(r.created_at)}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-muted-foreground">
-                  {r.ip ? (
-                    <Link href={href(sp, { ip: r.ip, log: undefined })} className="hover:text-primary hover:underline">
-                      {r.ip}
-                    </Link>
-                  ) : (
-                    "–"
-                  )}
-                </td>
-                <td className="max-w-md px-4 py-2.5">
-                  <Link
-                    href={href(sp, { log: String(r.id) })}
-                    className="block truncate text-foreground hover:text-primary hover:underline"
-                  >
-                    {r.query}
-                  </Link>
-                </td>
-                <td className="whitespace-nowrap px-4 py-2.5">
-                  {r.route ? <RoutePill route={r.route} /> : <span className="text-muted-foreground">–</span>}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono tabular-nums text-muted-foreground">
-                  {fmtScore(r.top_score)}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2.5 text-center">
-                  {r.has_hallucination ? (
-                    <span
-                      className="inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold text-destructive"
-                      style={{ background: tint("var(--destructive)", 12) }}
+            {rows.map((r) => {
+              const kind = dayKindOf(r.created_at, holidaySet);
+              return (
+                <tr
+                  key={r.id}
+                  className={`border-b border-border/60 transition last:border-0 hover:bg-muted/50 ${
+                    selectedId === r.id ? "bg-accent" : ""
+                  }`}
+                >
+                  <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs tabular-nums text-muted-foreground">
+                    {fmtTime(r.created_at)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-muted-foreground">
+                    {r.ip ? (
+                      <Link href={href(sp, { ip: r.ip, log: undefined })} className="hover:text-primary hover:underline">
+                        {r.ip}
+                      </Link>
+                    ) : (
+                      "–"
+                    )}
+                  </td>
+                  <td className="max-w-md px-4 py-2.5">
+                    <Link
+                      href={href(sp, { log: String(r.id) })}
+                      className="block truncate text-foreground hover:text-primary hover:underline"
                     >
-                      환각
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground/30">·</span>
-                  )}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2.5 text-center">
-                  {r.feedback === 1 ? (
-                    <span title="도움됨">👍</span>
-                  ) : r.feedback === -1 ? (
-                    <span title="아쉬움">👎</span>
-                  ) : (
-                    <span className="text-muted-foreground/30">·</span>
-                  )}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono tabular-nums text-muted-foreground">
-                  {fmtDur(r.total_ms)}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono text-xs tabular-nums text-muted-foreground">
-                  {((r.tokens_in ?? 0) + (r.tokens_out ?? 0)).toLocaleString()}
-                </td>
-              </tr>
-            ))}
+                      {r.query}
+                    </Link>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5">
+                    {r.route ? <RoutePill route={r.route} /> : <span className="text-muted-foreground">–</span>}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-center">
+                    {kind ? <DayKindPill kind={kind} /> : <span className="text-muted-foreground/40">–</span>}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-center">
+                    {r.has_hallucination ? (
+                      <span
+                        className="inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold text-destructive"
+                        style={{ background: tint("var(--destructive)", 12) }}
+                      >
+                        환각
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground/30">·</span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-center">
+                    {r.feedback === 1 ? (
+                      <span title="도움됨">👍</span>
+                    ) : r.feedback === -1 ? (
+                      <span title="아쉬움">👎</span>
+                    ) : (
+                      <span className="text-muted-foreground/30">·</span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono tabular-nums text-muted-foreground">
+                    {fmtDur(r.total_ms)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono text-xs tabular-nums text-muted-foreground">
+                    {((r.tokens_in ?? 0) + (r.tokens_out ?? 0)).toLocaleString()}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </section>
 
-      {/* 무한 스크롤 푸터 — 상태 표시는 가운데 정렬. 스크롤이 하단(sentinel)에
-          닿으면 자동으로 다음 페이지를 당겨온다(더보기 버튼 없음). */}
-      <div ref={sentinelRef} className="mt-3 flex flex-col items-center gap-1.5 py-3">
-        {loading ? (
-          <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-            <span
-              className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-[2px] border-border border-t-primary"
-              aria-hidden
-            />
-            불러오는 중…
+      {/* 페이지네이션 — 좌: 페이지당 건수(20~300), 우: 범위·이전/다음. 필터 내 총건수(total)로
+          페이지 수를 산출한다. */}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-1">
+        <div className="flex items-center gap-1">
+          <span className="mr-1 text-xs text-muted-foreground/70">페이지당</span>
+          {PAGE_SIZES.map((n) => (
+            <button key={n} onClick={() => changeSize(n)} className={chip(pageSize === n)} disabled={loading}>
+              {n}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {loading ? "불러오는 중…" : error ? "불러오기 실패" : rangeText}
           </span>
-        ) : error ? (
-          <button
-            onClick={loadMore}
-            className="rounded-md border border-border bg-card px-4 py-1.5 text-[13px] font-medium text-destructive shadow-sm transition hover:bg-muted"
-          >
-            불러오기 실패 — 다시 시도
-          </button>
-        ) : hasMore ? (
-          <span className="text-[11px] text-muted-foreground/50">아래로 스크롤하면 더 조회됩니다</span>
-        ) : (
-          rows.length > 0 && (
-            <span className="text-[11px] text-muted-foreground/50">·</span>
-          )
-        )}
-        <p className="text-xs text-muted-foreground/70">{rows.length.toLocaleString()}건 표시</p>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={loading || page <= 0}
+              className={navBtn}
+            >
+              ‹ 이전
+            </button>
+            <span className="px-2 text-xs tabular-nums text-muted-foreground">
+              {page + 1} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={loading || page >= totalPages - 1}
+              className={navBtn}
+            >
+              다음 ›
+            </button>
+          </div>
+        </div>
       </div>
     </>
   );

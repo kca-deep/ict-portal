@@ -8,6 +8,7 @@ import {
 } from "@/lib/db/query-log";
 import { UsageChart, RouteDonut } from "./charts";
 import { LogTable } from "./log-table";
+import { getKoreanHolidaysForYears } from "@/lib/holidays";
 
 // 관리자 대시보드(쿼리로그 뷰어). 미들웨어(/admin 게이트)가 서명 쿠키를 통과시킨
 // 요청만 도달한다. 데이터는 전부 서버에서 service_role 로만 읽으므로 그 키가
@@ -130,7 +131,7 @@ export default async function AdminPage({
   const until = to ? `${to}T23:59:59` : undefined;
 
   const filter: QueryLogFilter = {
-    limit: 10,
+    limit: 20, // 로그 표 기본 페이지 크기(20/50/100/200/300 중 기본)
     route,
     hallucinationOnly,
     negativeOnly,
@@ -149,6 +150,16 @@ export default async function AdminPage({
       ? getQueryLog(selectedId)
       : Promise.resolve(null),
   ]);
+
+  // 로그 표 "시간대" 배지(주말/휴일/심야)용 공휴일 날짜키. 현재 연도 ±1 + 초기 행의
+  // 연도를 커버(페이징으로 더 불러오는 행도 대부분 이 범위). KST 연도 기준.
+  const nowKstYear = new Date(Date.now() + 9 * 3600 * 1000).getUTCFullYear();
+  const holidayYears = new Set<number>([nowKstYear - 1, nowKstYear, nowKstYear + 1]);
+  for (const r of rows) {
+    holidayYears.add(new Date(new Date(r.created_at).getTime() + 9 * 3600 * 1000).getUTCFullYear());
+  }
+  const holidayMap = await getKoreanHolidaysForYears([...holidayYears]);
+  const holidayKeys = [...holidayMap.values()].flatMap((s) => [...s]);
 
   const periods: Array<[string, string | undefined]> = [
     ["24시간", "24h"],
@@ -223,6 +234,24 @@ export default async function AdminPage({
                   label="이용률"
                   value={stats.avgPerUser == null ? "–" : stats.avgPerUser.toFixed(1)}
                   sub="평균 질문/인"
+                />
+              </div>
+
+              {/* 사용 패턴: 상담 부재 시간대(쉬는 날·평일 저녁심야) 이용 비중 — 자동화
+                  서비스의 가치를 보여주는 지표. 두 버킷은 교집합 없음(쉬는 날은 하루 전체).
+                  KST 기준(query_log 는 UTC 저장). 쉬는 날=주말+공휴일(공공데이터포털). */}
+              <div className="mt-5 grid grid-cols-2 gap-4 border-t border-border pt-4">
+                <PatternStat
+                  label="쉬는 날 사용"
+                  count={stats.restDayCount}
+                  total={stats.total}
+                  note="주말·공휴일 · KST"
+                />
+                <PatternStat
+                  label="평일 저녁·심야 사용"
+                  count={stats.weeknightCount}
+                  total={stats.total}
+                  note="18시~익일 6시 · KST"
                 />
               </div>
 
@@ -394,6 +423,8 @@ export default async function AdminPage({
             .map((v) => v ?? "")
             .join("|")}
           initialRows={rows}
+          total={stats.total}
+          holidays={holidayKeys}
           sp={{
             period,
             route,
@@ -438,6 +469,41 @@ function HeroStat({
         {value}
       </div>
       <div className="mt-1.5 text-[11px] text-muted-foreground/80">{sub}</div>
+    </div>
+  );
+}
+
+// 사용 패턴 타일 — 건수(큰 숫자) + 전체 대비 비율 미터. 히어로보다 한 단계 작게.
+function PatternStat({
+  label,
+  count,
+  total,
+  note,
+}: {
+  label: string;
+  count: number;
+  total: number;
+  note: string;
+}) {
+  const ratio = pctNum(count, total);
+  return (
+    <div>
+      <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-1 flex items-baseline gap-1.5">
+        <span className="font-serif text-2xl leading-none tabular-nums text-foreground">
+          {count.toLocaleString()}
+        </span>
+        <span className="text-[13px] tabular-nums text-muted-foreground">
+          {pct(count, total)}
+        </span>
+      </div>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${Math.max(0, Math.min(100, ratio))}%`, background: "var(--primary)" }}
+        />
+      </div>
+      <div className="mt-1 text-[11px] text-muted-foreground/70">{note}</div>
     </div>
   );
 }

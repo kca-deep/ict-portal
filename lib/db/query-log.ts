@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/db/supabase";
+import { getKoreanHolidaysForYears } from "@/lib/holidays";
 
 // query_log 한 행. 파이프라인이 산출하는 신호를 그대로 담는다(대부분 route.ts 에 이미
 // 존재하는 변수). 사용자 식별은 로그인이 없어 user_id 대신 요청 IP 로 한다(4장 레이트리밋과
@@ -208,6 +209,8 @@ export type QueryLogStats = {
   errorCount: number; // error_code 가 있는 요청 수
   positiveCount: number; // 👍(+1) 수
   ratedCount: number; // 평가된(👍/👎) 수 = 만족도 분모
+  restDayCount: number; // KST 기준 쉬는 날(주말+공휴일·대체·선거일) 사용 건수
+  weeknightCount: number; // KST 기준 평일 저녁·심야(18시~다음날 6시) 사용 건수 (쉬는 날 제외)
   avgTotalMs: number | null;
   avgTtftMs: number | null;
   series: { label: string; count: number }[]; // 사용량 추이(시간/일 버킷)
@@ -247,6 +250,24 @@ function buildUsageSeries(
 // 집계 대상 상한 — PoC 규모(소량)라 행을 가져와 JS 에서 집계한다. 창이 커지면 RPC 로 승격.
 const STATS_ROW_CAP = 5000;
 
+// created_at(UTC 저장)을 KST(UTC+9) 벽시계로 환산해 요일·시각·날짜키·연도를 얻는다.
+// Vercel 서버는 UTC 라 getHours()/getDay() 를 그대로 쓰면 9시간 어긋나므로, 타임스탬프에
+// +9h 한 뒤 getUTC*() 로 KST 값을 읽는다(서버 로컬 TZ 무관). dateKey 는 공휴일 집합
+// 대조용 "YYYY-MM-DD".
+const KST_OFFSET_MS = 9 * 3600 * 1000;
+function kstInfo(iso: string): { day: number; hour: number; dateKey: string; year: number } {
+  const d = new Date(new Date(iso).getTime() + KST_OFFSET_MS);
+  const year = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return {
+    day: d.getUTCDay(), // 0=일 … 6=토
+    hour: d.getUTCHours(),
+    dateKey: `${year}-${mm}-${dd}`,
+    year,
+  };
+}
+
 /** 요약 집계(필터 범위 내). 분기 비율·환각 건수·평균 지연·토큰 합계. */
 export async function queryLogStats(
   filter: QueryLogFilter = {},
@@ -285,14 +306,31 @@ export async function queryLogStats(
   let errorCount = 0;
   let positiveCount = 0;
   let ratedCount = 0;
+  let restDayCount = 0;
+  let weeknightCount = 0;
   let totalMsSum = 0;
   let totalMsN = 0;
   let ttftMsSum = 0;
   let ttftMsN = 0;
 
+  // 쉬는 날 판정용 공휴일 집합 — 데이터에 등장하는 연도만 조회(캐싱·폴백은 lib/holidays).
+  const years = new Set<number>();
+  for (const r of rows) years.add(kstInfo(r.created_at).year);
+  const holidayByYear = await getKoreanHolidaysForYears([...years]);
+
   for (const r of rows) {
     if (r.ip) users.add(r.ip);
     times.push(new Date(r.created_at).getTime());
+    // 쉬는 날(주말+공휴일)과 평일 저녁·심야를 상호배타로 카운트한다. 쉬는 날은 하루 전체를
+    // 쉬는 날 버킷이 가져가므로, 평일 저녁·심야는 쉬는 날이 아닐 때만 잡힌다(교집합 없음).
+    const { day, hour, dateKey, year } = kstInfo(r.created_at);
+    const isRestDay =
+      day === 0 || day === 6 || (holidayByYear.get(year)?.has(dateKey) ?? false);
+    if (isRestDay) {
+      restDayCount += 1;
+    } else if (hour >= 18 || hour < 6) {
+      weeknightCount += 1;
+    }
     if (r.route === "unified" || r.route === "regulation" || r.route === "law" || r.route === "out_of_scope") {
       byRoute[r.route] += 1;
     } else {
@@ -332,6 +370,8 @@ export async function queryLogStats(
     errorCount,
     positiveCount,
     ratedCount,
+    restDayCount,
+    weeknightCount,
     avgTotalMs: totalMsN ? Math.round(totalMsSum / totalMsN) : null,
     avgTtftMs: ttftMsN ? Math.round(ttftMsSum / ttftMsN) : null,
     series: buildUsageSeries(times, filter.since),
