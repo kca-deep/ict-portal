@@ -17,6 +17,10 @@ const envSchema = z.object({
 
   LLM_MODEL: z.string().default("claude-sonnet-4-6"),
 
+  // 의도 분해 게이트 전용 소형 모델 — 답변 LLM(LLM_MODEL, Sonnet 단독)과 분리.
+  // 분류·분해 수준의 작업이라 Haiku 로 충분하고 지연·비용이 낮다.
+  INTENT_MODEL: z.string().default("claude-haiku-4-5"),
+
   // ingest 관리자 시크릿 — 미설정 시 /api/ingest 는 항상 403(외부 노출 금지).
   INGEST_SECRET: z.string().optional(),
 
@@ -42,12 +46,14 @@ const envSchema = z.object({
 
   RETRIEVAL_TOP_K: z.coerce.number().default(30),
   RERANK_TOP_K: z.coerce.number().default(8),
-  // 관련도 분기 기준치 (rerank 최상위 relevanceScore, 0~1). 미만이면 법제처 폴백.
+  // 통합 리랭킹(규정+법령 단일 풀)의 관련도 문턱 (rerank relevanceScore, 0~1).
+  // ① 통합 maxScore 미만 → 근거 없음(범위 게이트로) ② 주입 항목별 바닥(노이즈 차단)
+  // ③ 판례 필터의 공통 기준.
   RELEVANCE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.33),
-  // 회색지대 상한 — maxScore 가 [RELEVANCE_THRESHOLD, RELEVANCE_GRAY_UPPER) 이면
-  // 규정 관련도가 애매하다고 보고 LLM 적합성 게이트로 규정/법령을 재판정한다.
-  // 임계치를 근소하게 넘긴 노이즈 규정청크의 오라우팅 차단(예: 0.35 vs 0.33).
-  RELEVANCE_GRAY_UPPER: z.coerce.number().min(0).max(1).default(0.45),
+  // 복합 질의 의도 분해 시, 의도별 상위 2건에 한해 적용하는 완화 문턱(B안).
+  // "절차 개요"형 의도는 조문 하나하나가 절차의 파편이라 점수가 낮게 갈리므로
+  // (실측 0.25~0.35), 의도별 대표 근거의 진입로를 열어 준다. 3위부터는 기본 문턱.
+  RELEVANCE_INTENT_FLOOR: z.coerce.number().min(0).max(1).default(0.25),
 
   CRAWLER_USER_AGENT: z.string().default("PIMS-Crawler/1.0"),
   CRAWLER_TIMEOUT_MS: z.coerce.number().default(10000),

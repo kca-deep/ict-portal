@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { env } from "@/lib/env";
 import {
   CHAT_SYSTEM_PROMPT,
-  RELEVANCE_GATE_PROMPT,
+  INTENT_DECOMPOSE_PROMPT,
   SCOPE_GATE_PROMPT,
   SYSTEM_PROMPT,
 } from "@/lib/ai/prompts";
@@ -48,42 +48,48 @@ function buildUserMessage(ctx: ChatContext): string {
 }
 
 /**
- * 적합성 게이트: 검색된 내부 규정만으로 질문에 답할 핵심 근거가 있는지 LLM이 YES/NO로 판정.
- * "관련도 점수는 기준치 이상이지만 실제로는 규정에 답이 없는" 회색지대를 잡아
- * 법제처 폴백 여부를 결정한다. 실패 시 충분(true)으로 폴백해 답변을 막지 않는다.
+ * 의도 분해 게이트: 검색 대상이 서로 다른 목적이 2개 이상 담긴 복합 질의를
+ * 독립 검색 질의들로 분해한다(최대 3개). 단일 목적이거나 실패하면 빈 배열 —
+ * route 는 빈 배열을 "분해 없음(단일 의도, 기존 경로)"으로 처리하므로 게이트
+ * 장애가 답변을 막지 않는다. 소형 모델(INTENT_MODEL, Haiku) 사용 — 분류·분해
+ * 수준 작업이라 충분하고, route 가 원질의 검색과 병렬로 돌려 지연을 은닉한다.
  */
-export async function isRegulationSufficient(
-  query: string,
-  retrievedDocs: RetrievedDoc[],
-): Promise<boolean> {
-  if (retrievedDocs.length === 0) return false;
+export async function decomposeIntents(query: string): Promise<string[]> {
+  if (!query.trim()) return [];
   try {
-    const context = retrievedDocs
-      .map((d, i) => `[자료 ${i + 1}] ${d.title ?? ""}\n${d.content}`)
-      .join("\n\n");
     const res = await anthropic.messages.create({
-      model: env.LLM_MODEL,
-      max_tokens: 8,
-      system: [{ type: "text", text: RELEVANCE_GATE_PROMPT }],
+      model: env.INTENT_MODEL,
+      max_tokens: 300,
+      system: [{ type: "text", text: INTENT_DECOMPOSE_PROMPT }],
       messages: [
         {
           role: "user",
-          content: `질문: ${query}\n\n<내부규정>\n${context}\n</내부규정>\n\n위 내부 규정만으로 질문의 핵심에 답할 수 있으면 YES, 핵심 근거가 없으면 NO. 한 단어만.`,
+          content: `질문: ${query}\n\nJSON 문자열 배열만 출력.`,
         },
       ],
     });
     const text = res.content
       .map((b) => (b.type === "text" ? b.text : ""))
       .join("")
-      .trim()
-      .toUpperCase();
-    return !text.startsWith("NO");
+      .trim();
+    // 모델이 배열 앞뒤로 군말을 붙여도 첫 JSON 배열만 취한다.
+    const m = text.match(/\[[\s\S]*?\]/);
+    if (!m) return [];
+    const parsed: unknown = JSON.parse(m[0]);
+    if (!Array.isArray(parsed)) return [];
+    const intents = parsed
+      .filter((v): v is string => typeof v === "string")
+      .map((s) => s.trim())
+      .filter((s) => s.length >= 2 && s.length <= 120)
+      .slice(0, 3);
+    // 의도 1개는 분해 의미가 없다(원질의 경로와 동일) → 빈 배열로 정규화.
+    return intents.length >= 2 ? intents : [];
   } catch (err) {
     console.error(
-      "[chat] relevance gate failed, treating as sufficient:",
+      "[chat] intent decompose failed, treating as single intent:",
       (err as Error).message,
     );
-    return true;
+    return [];
   }
 }
 

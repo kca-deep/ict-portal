@@ -26,11 +26,14 @@ type Message = {
   // /api/chat 의 meta 이벤트로 받은 query_log 행 id(피드백 상관용).
   queryId?: number;
   feedback?: -1 | 1;
+  // citations 이벤트 — 답변 속 조문 인용이 법제처에서 확인 안 됨(환각 경고 배지).
+  hasHallucination?: boolean;
 };
 
 type StreamEvent =
   | { type: "sources"; data: SourceChunk[] }
   | { type: "delta"; text: string }
+  | { type: "citations"; data: unknown[]; hasHallucination: boolean }
   | { type: "meta"; queryId: number }
   | { type: "done" }
   | { type: "error"; message: string };
@@ -166,6 +169,10 @@ export default function Home() {
     // 스트리밍 표시용 rAF 타이프라이터 제어(try 안에서 사용, finally 에서 정리).
     let rafId = 0;
     let stopped = false;
+    // 참조문서 버퍼 — 서버는 스트리밍 전에 sources 를 선발송하지만(중단 시 데이터
+    // 유실 방지), 화면 표시는 답변 생성 완료 후에만 한다(revealSources). '멈춤'
+    // 경로(catch)에서도 수신분을 붙일 수 있도록 try 밖에 둔다.
+    let sources: SourceChunk[] | undefined;
 
     try {
       const startedAt = performance.now();
@@ -194,12 +201,13 @@ export default function Home() {
       // ※ 이전 타이프라이터 동결 원인은 '고정 1글자/프레임' → 프레임 수 폭증으로 매
       //   프레임 전체 재파싱이 누적된 것. backlog 비례 step + 변화 시에만 렌더로 해소.
       let target = "";
-      let sources: SourceChunk[] | undefined;
       let queryId: number | undefined;
+      let hasHallucination: boolean | undefined;
       let displayed = 0;
       let streamDone = false;
       let lastLen = -1;
-      let lastSources: SourceChunk[] | undefined;
+      // 참조문서는 답변 생성이 끝난 뒤에만 표시한다(스트리밍 중 노출 안 함).
+      let revealSources = false;
 
       const paint = (content: string, responseMs?: number) => {
         setMessages((prev) => {
@@ -208,10 +216,11 @@ export default function Home() {
           copy[copy.length - 1] = {
             role: "assistant",
             content,
-            sources,
+            sources: revealSources ? sources : undefined,
             responseMs: responseMs ?? prevMsg?.responseMs,
             queryId,
             feedback: prevMsg?.feedback,
+            hasHallucination,
           };
           return copy;
         });
@@ -222,7 +231,9 @@ export default function Home() {
           if (stopped) return resolve();
           // 네트워크 종료 시 남은 backlog 를 한 번에 확정 표시하고 종료
           // (탭 비활성으로 rAF 가 멈춰 await 가 영구 대기하는 것을 방지).
+          // 참조문서도 이 최종 paint 에서 처음으로 함께 표시된다(답변 완료 후 노출).
           if (streamDone) {
+            revealSources = true;
             paint(target, Math.round(performance.now() - startedAt));
             return resolve();
           }
@@ -234,10 +245,9 @@ export default function Home() {
             );
           }
           // 변화가 있을 때만 재파싱(대기 구간의 불필요한 렌더 방지).
-          if (displayed !== lastLen || sources !== lastSources) {
+          if (displayed !== lastLen) {
             paint(target.slice(0, displayed));
             lastLen = displayed;
-            lastSources = sources;
           }
           rafId = requestAnimationFrame(tick);
         };
@@ -266,6 +276,8 @@ export default function Home() {
             sources = ev.data;
           } else if (ev.type === "delta") {
             target += ev.text;
+          } else if (ev.type === "citations") {
+            hasHallucination = ev.hasHallucination;
           } else if (ev.type === "meta") {
             queryId = ev.queryId;
           } else if (ev.type === "error") {
@@ -278,10 +290,16 @@ export default function Home() {
     } catch (err) {
       if ((err as Error).name === "AbortError") {
         // 사용자가 '멈춤'을 눌렀다. 지금까지 받은 답은 그대로 남기되,
-        // 한 글자도 못 받았으면 빈 말풍선을 제거한다.
+        // 한 글자도 못 받았으면 빈 말풍선을 제거한다. 서버가 선발송한 참조문서를
+        // 이미 받았다면 이때 함께 붙인다(중단해도 근거는 확인 가능 — 이슈 A 유지).
         setMessages((prev) => {
           const last = prev[prev.length - 1];
           if (last?.role === "assistant" && !last.content) return prev.slice(0, -1);
+          if (last?.role === "assistant" && sources && sources.length > 0) {
+            const copy = prev.slice();
+            copy[copy.length - 1] = { ...last, sources };
+            return copy;
+          }
           return prev;
         });
       } else {
@@ -511,6 +529,17 @@ export default function Home() {
                     )}
                     {m.content && !(loading && i === messages.length - 1) && (
                       <>
+                        {/* 인용 검증 환각 경고 — 답변 속 조문 인용이 법제처에서 확인되지 않음. */}
+                        {m.hasHallucination && (
+                          <div className="mt-3 flex gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-[13px] leading-relaxed text-destructive">
+                            <TriangleAlert className="w-4 h-4 shrink-0 mt-0.5" aria-hidden />
+                            <span>
+                              답변에 인용된 일부 법령 조문이 법제처에서 확인되지
+                              않았습니다. 조문 번호는 반드시 법제처 원문으로
+                              확인하시기 바랍니다.
+                            </span>
+                          </div>
+                        )}
                         {/* 모든 답변 끝에 고정 표시되는 면책 안내(LLM 출력과 무관). */}
                         <div className="mt-3 pt-3 border-t border-card-foreground/15 flex gap-2 text-[13px] italic leading-relaxed text-muted-foreground">
                           <TriangleAlert
@@ -764,19 +793,24 @@ function SourceItem({
             {plainPreview(source.content)}
           </span>
         </span>
-        {isLaw ? (
-          <span
-            className="shrink-0 inline-flex items-center rounded-full bg-badge-law/12 px-1.5 py-0.5 text-[10px] font-semibold text-badge-law mt-0.5"
-            title="법제처 국가법령정보"
-          >
-            법제처 법령
-          </span>
-        ) : isPrecedent ? (
-          <span
-            className="shrink-0 inline-flex items-center rounded-full bg-badge-law/12 px-1.5 py-0.5 text-[10px] font-semibold text-badge-law mt-0.5"
-            title="법제처 판례·헌재결정"
-          >
-            판례
+        {isLaw || isPrecedent ? (
+          // 통합 리랭킹 이후 법령·판례도 규정과 같은 잣대의 관련도 점수를 갖는다.
+          // score=0(판례 필터 실패 폴백 등)이면 %는 생략하고 종류 뱃지만 표시.
+          <span className="shrink-0 inline-flex items-center gap-1 mt-0.5">
+            {source.score > 0 && (
+              <span
+                className="inline-flex items-center rounded-full bg-badge-law/12 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-badge-law"
+                title="검색 관련도 (Cohere rerank)"
+              >
+                {percent}%
+              </span>
+            )}
+            <span
+              className="inline-flex items-center rounded-full bg-badge-law/12 px-1.5 py-0.5 text-[10px] font-semibold text-badge-law"
+              title={isLaw ? "법제처 국가법령정보" : "법제처 판례·헌재결정"}
+            >
+              {isLaw ? "법제처 법령" : "판례"}
+            </span>
           </span>
         ) : (
           <span

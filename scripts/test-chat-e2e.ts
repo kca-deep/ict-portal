@@ -20,7 +20,6 @@ async function ask(query: string) {
   }
   const text = await res.text();
   let answer = "";
-  let routing: any = null;
   let sources: any[] = [];
   let citations: any = null;
   for (const line of text.split("\n")) {
@@ -32,13 +31,20 @@ async function ask(query: string) {
       continue;
     }
     if (ev.type === "delta") answer += ev.text;
-    else if (ev.type === "routing") routing = ev;
     else if (ev.type === "sources") sources = ev.data;
     else if (ev.type === "citations") citations = ev;
   }
 
+  // 통합 파이프라인(routing 이벤트 폐지): 소스 구성으로 주입 상태를 요약한다.
+  const mix = sources.reduce((m: Record<string, number>, s: any) => {
+    const k = (s.metadata?.kind as string) ?? "regulation";
+    m[k] = (m[k] ?? 0) + 1;
+    return m;
+  }, {});
+  const top = sources[0]?.score;
   console.log(
-    `\n[라우팅] ${routing?.route === "law" ? "⚖️ 법령" : "📘 내부규정"} (maxScore ${routing?.score?.toFixed?.(3) ?? "?"})`,
+    `\n[통합 주입] ${sources.length}건 (${Object.entries(mix).map(([k, n]) => `${k} ${n}`).join(", ") || "없음 — 근거 미주입/범위밖"})` +
+      (typeof top === "number" ? ` maxScore=${top.toFixed(3)}` : ""),
   );
   console.log(`\n[답변]\n${answer}`);
 

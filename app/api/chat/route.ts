@@ -2,13 +2,20 @@ import { NextRequest } from "next/server";
 import {
   ragChatStream,
   isInScope,
-  isRegulationSufficient,
+  decomposeIntents,
   type ChatMessage,
   type RetrievedDoc,
 } from "@/lib/ai/llm-router";
 import { regulationSearch, type DocumentHit } from "@/lib/db/search";
 import { rerank } from "@/lib/ai/rerank";
-import { searchAiLaw, formatArticle, type RetrievedLaws } from "@/lib/law/search";
+import {
+  fetchAiLawCandidates,
+  formatArticle,
+  articleKeyOf,
+  mergeRetrievedLaws,
+  type AiArticleHit,
+  type AiLawCandidates,
+} from "@/lib/law/search";
 import {
   searchDecisions,
   getDecisionText,
@@ -48,50 +55,77 @@ export type SourceChunk = {
 
 export type StreamEvent =
   | { type: "sources"; data: SourceChunk[] }
-  | { type: "routing"; route: "regulation" | "law"; score: number; laws?: { name: string; lawId: string }[] }
   | { type: "delta"; text: string }
   | { type: "citations"; data: CitationVerdict[]; hasHallucination: boolean }
   | { type: "meta"; queryId: number }
   | { type: "done" }
   | { type: "error"; message: string };
 
-// 검색 후보(최대 RETRIEVAL_TOP_K)를 Cohere로 재정렬해 관련도 상위 RERANK_TOP_K건만 반환.
-// 재정렬 실패 시 RRF 점수 순 상위 RERANK_TOP_K건으로 안전하게 폴백.
-async function topRerankedSources(
-  query: string,
-  hits: DocumentHit[],
-): Promise<SourceChunk[]> {
-  if (hits.length === 0) return [];
+// 통합 리랭킹 풀의 후보 한 건 — 내부 규정 청크 또는 법제처 법령 조문.
+type PoolItem =
+  | { kind: "regulation"; hit: DocumentHit }
+  | { kind: "law"; hit: AiArticleHit };
 
-  const toSource = (h: DocumentHit, score: number): SourceChunk => ({
-    id: h.id,
-    title: h.title,
-    source_ref: h.source_ref,
-    content: h.content,
-    metadata: h.metadata,
-    score,
-  });
+type RankedItem = { item: PoolItem; score: number };
+// 의도 분해 경로의 선발 항목 — 어느 의도 질의가 이 근거를 뽑았는지 라벨을 남긴다.
+type RankedPick = RankedItem & { intent?: string };
+
+// 후보 중복 제거 키 — 규정은 문서 id, 법령은 법령ID+조문키.
+const poolKey = (p: PoolItem) =>
+  p.kind === "regulation"
+    ? `reg:${p.hit.id}`
+    : `law:${p.hit.lawId}:${articleKeyOf(p.hit)}`;
+
+// 원질의 후보를 의도 풀에 공용 합류시킬 때의 중복 제거 병합.
+function mergeRegHits(primary: DocumentHit[], extra: DocumentHit[]): DocumentHit[] {
+  const seen = new Set(primary.map((h) => h.id));
+  return [...primary, ...extra.filter((h) => !seen.has(h.id))];
+}
+function mergeLawHits(primary: AiArticleHit[], extra: AiArticleHit[]): AiArticleHit[] {
+  const key = (h: AiArticleHit) => `${h.lawId}:${articleKeyOf(h)}`;
+  const seen = new Set(primary.map(key));
+  return [...primary, ...extra.filter((h) => !seen.has(key(h)))];
+}
+
+// 규정 청크 + 법령 조문을 한 풀에서 Cohere로 1회 재정렬해 상위 RERANK_TOP_K건 반환
+// (내림차순). 소스 간 동일 잣대 점수라 규정·법령이 순수 점수순으로 경쟁한다.
+// 재정렬 실패 시 교차 소스 점수가 없으므로 법령을 버리고 규정 RRF 순으로 폴백.
+async function rerankUnifiedPool(
+  query: string,
+  regHits: DocumentHit[],
+  lawHits: AiArticleHit[],
+  topN: number = env.RERANK_TOP_K,
+): Promise<RankedItem[]> {
+  const pool: PoolItem[] = [
+    ...regHits.map((hit): PoolItem => ({ kind: "regulation", hit })),
+    ...lawHits.map((hit): PoolItem => ({ kind: "law", hit })),
+  ];
+  if (pool.length === 0) return [];
 
   try {
-    const byId = new Map(hits.map((h) => [h.id, h]));
     const reranked = await rerank(
       query,
-      hits.map((h) => ({ id: h.id, text: h.content })),
-      env.RERANK_TOP_K,
+      pool.map((p, i) => ({
+        id: i,
+        text:
+          p.kind === "regulation"
+            ? p.hit.content
+            : `${p.hit.name} ${p.hit.articleTitle}\n${p.hit.body}`,
+      })),
+      topN,
     );
-    return reranked
-      .map((r) => {
-        const h = byId.get(r.id as number);
-        return h ? toSource(h, r.score) : null;
-      })
-      .filter((s): s is SourceChunk => s !== null);
+    return reranked.map((r) => ({ item: pool[r.id as number], score: r.score }));
   } catch (err) {
     // 재정렬 실패를 조용히 삼키면 점수가 RRF(=낮은 %)로 표기되어 원인 추적이 어렵다.
-    // 서버 로그로 드러내고 RRF 점수 순 상위 RERANK_TOP_K건으로 폴백한다.
-    console.error("[chat] rerank failed, falling back to RRF order:", (err as Error).message);
-    return hits
-      .slice(0, env.RERANK_TOP_K)
-      .map((h) => toSource(h, h.rrf_score));
+    // 서버 로그로 드러내고 규정 RRF 순 상위 topN건으로 폴백한다(법령 조문은
+    // 규정과 비교 가능한 점수가 없어 안전하게 제외).
+    console.error(
+      "[chat] 통합 rerank 실패 — 규정 RRF 순 폴백(법령 제외):",
+      (err as Error).message,
+    );
+    return regHits
+      .slice(0, topN)
+      .map((hit) => ({ item: { kind: "regulation", hit } as PoolItem, score: hit.rrf_score }));
   }
 }
 
@@ -101,10 +135,12 @@ const DECISION_LABEL: Record<DecisionDomain, string> = {
 };
 
 // 판례 본문을 참조문서 패널용 SourceChunk 로 변환 (kind=precedent).
+// score 는 판례 필터(Cohere)의 관련도 — 0 이면 UI 가 % 표시를 생략한다(필터 실패 폴백).
 function toPrecedentSource(
   r: DecisionRef,
   t: DecisionText,
   i: number,
+  score: number,
 ): SourceChunk {
   const parts = [
     t.summary && `**판시사항**\n\n${t.summary}`,
@@ -118,7 +154,7 @@ function toPrecedentSource(
     source_ref: `법제처 ${DECISION_LABEL[r.domain]} · ${r.court}${r.date ? ` ${r.date}` : ""} · 일련번호 ${r.serial}`,
     content: parts.length > 0 ? parts.join("\n\n") : r.caseName,
     metadata: { kind: "precedent", serial: r.serial, domain: r.domain },
-    score: 0,
+    score,
   };
 }
 
@@ -216,123 +252,262 @@ export async function POST(req: NextRequest) {
         session_id: sessionId,
       };
       try {
-        // 1) 최대 RETRIEVAL_TOP_K(=30)건 후보 검색 → 2) Cohere 재정렬로 관련도 산출
-        //    → 3) 상위 RERANK_TOP_K(=8)건만 LLM 근거로 사용
+        // 1) 통합 검색 — 내부 규정(최대 RETRIEVAL_TOP_K=30) + 법제처 법령 조문(≤50)
+        //    + 판례 목록(투기적, 주입분에 법령이 있을 때만 소비) + 의도 분해 게이트를
+        //    전부 동시에 발사한다(투기적 병렬 — 대부분의 단일 의도 질의는 분해 결과를
+        //    기다릴 필요가 없어 TTFT 증가가 없다). 법령·판례·분해는 best-effort.
         const tRetrieval = Date.now();
-        const hits = await regulationSearch(query, env.RETRIEVAL_TOP_K);
+        const [hits, lawCand, precRefs, intents] = await Promise.all([
+          regulationSearch(query, env.RETRIEVAL_TOP_K),
+          fetchAiLawCandidates(query),
+          searchDecisions(query, "prec", 2),
+          decomposeIntents(query),
+        ]);
+
+        // 1-b) 복합 의도(2개 이상)면 의도별 검색을 추가 발사. 검색 대상이 다른 목적이
+        //    한 질의에 섞이면 지배 의도가 법제처 의미검색을 독점해(예: 기금 어휘가
+        //    회생법을 밀어냄) 부차 의도 법령이 후보에 못 들기 때문에, 의도 단위로
+        //    후보를 회수한다. 원질의 후보는 각 의도 풀에 공용 합류(리콜 보강).
+        type IntentPool = { intent: string; reg: DocumentHit[]; law: AiLawCandidates };
+        let intentPools: IntentPool[] = [];
+        if (intents.length >= 2) {
+          intentPools = await Promise.all(
+            intents.map(async (intent) => {
+              const [reg, law] = await Promise.all([
+                regulationSearch(intent, env.RETRIEVAL_TOP_K),
+                fetchAiLawCandidates(intent),
+              ]);
+              return { intent, reg, law };
+            }),
+          );
+        }
         logRow.retrieval_ms = Date.now() - tRetrieval;
+
+        // 2) 통합 리랭킹 — 규정 청크와 법령 조문을 한 풀·같은 잣대(Cohere)로 재정렬.
+        //    · 단일 의도(기본): 원질의 기준 1회 재정렬 → 문턱 이상 top-K (기존 경로 그대로)
+        //    · 복합 의도: 의도별 풀을 "그 의도 질의" 기준으로 재정렬 — 긴 복합 질의
+        //      전체와 대조하면 부차 의도 조문이 구조적으로 저평가되는 것(실측 0.05~0.16)을
+        //      의도 기준 채점으로 복원한다. 선발은 B안: 의도별 상위 2건은 완화 문턱
+        //      (RELEVANCE_INTENT_FLOOR), 그 밖은 기본 문턱. 의도별 상한을 두고
+        //      의도 순서로 인터리브 병합(각 의도의 대표성 보장, 교차 중복은 고점 유지).
         const tRerank = Date.now();
-        const sources = await topRerankedSources(query, hits);
+        let picked: RankedPick[];
+        let maxScore: number;
+        if (intentPools.length === 0) {
+          const ranked = await rerankUnifiedPool(query, hits, lawCand.hits);
+          maxScore = ranked.length > 0 ? ranked[0].score : 0;
+          picked = ranked.filter((r) => r.score >= env.RELEVANCE_THRESHOLD);
+        } else {
+          const perIntentCap = Math.max(
+            2,
+            Math.ceil(env.RERANK_TOP_K / intentPools.length),
+          );
+          const rankedPerIntent = await Promise.all(
+            intentPools.map(async (p): Promise<RankedPick[]> => {
+              // topN 을 넉넉히(20) 받아 명시 법령 한정 후에도 선발 창이 남게 한다.
+              const ranked = await rerankUnifiedPool(
+                p.intent,
+                mergeRegHits(p.reg, hits),
+                mergeLawHits(p.law.hits, lawCand.hits),
+                Math.max(env.RERANK_TOP_K, 20),
+              );
+
+              // 명시 법령 한정 — 의도 질의에 법령 '정식 명칭'이 들어 있으면(분해기가
+              // 대상 법령을 지목), 이 의도의 법령 후보를 그 법령(본법 + 시행령·시행규칙)
+              // 조문으로 한정한다. 그 법령을 본문에서 '언급만' 하는 곁가지 조문(예: 회생
+              // 질의에 조특법 증권거래세 면제 — "회생계획에 따른 …" 문구의 어휘 밀도로
+              // 0.88을 받아 상위 독점)이 본체 법령을 밀어내는 것을 차단. 점수 보정 없이
+              // 후보 한정으로만 개입(표시 점수 정직성 유지). 규정 청크는 영향 없음.
+              const normIntent = p.intent.replace(/\s+/g, "");
+              const namedInIntent = (h: AiArticleHit) => {
+                const base = h.name
+                  .replace(/\s+/g, "")
+                  .replace(/(시행령|시행규칙)$/, "");
+                return base.length >= 2 && normIntent.includes(base);
+              };
+              const intentNamesLaw = ranked.some(
+                (r) => r.item.kind === "law" && namedInIntent(r.item.hit),
+              );
+              const scoped = intentNamesLaw
+                ? ranked.filter(
+                    (r) => r.item.kind !== "law" || namedInIntent(r.item.hit),
+                  )
+                : ranked;
+
+              // B안 선발: (한정 후) 상위 2건은 완화 문턱, 그 밖은 기본 문턱.
+              return scoped
+                .filter(
+                  (r, idx) =>
+                    r.score >=
+                    (idx < 2 ? env.RELEVANCE_INTENT_FLOOR : env.RELEVANCE_THRESHOLD),
+                )
+                .slice(0, perIntentCap)
+                .map((r) => ({ ...r, intent: p.intent }));
+            }),
+          );
+          maxScore = Math.max(0, ...rankedPerIntent.map((l) => l[0]?.score ?? 0));
+          // 인터리브 병합 — i번째 라운드에 각 의도의 i순위를 차례로. 같은 문서가
+          // 여러 의도에서 뽑히면 첫 등장 위치를 지키되 점수·의도는 높은 쪽을 남긴다.
+          const byKey = new Map<string, RankedPick>();
+          const order: string[] = [];
+          for (let i = 0; ; i++) {
+            let any = false;
+            for (const list of rankedPerIntent) {
+              const p = list[i];
+              if (!p) continue;
+              any = true;
+              const k = poolKey(p.item);
+              const prev = byKey.get(k);
+              if (!prev) {
+                byKey.set(k, p);
+                order.push(k);
+              } else if (p.score > prev.score) {
+                byKey.set(k, p);
+              }
+            }
+            if (!any) break;
+          }
+          picked = order.map((k) => byKey.get(k)!);
+        }
         logRow.rerank_ms = Date.now() - tRerank;
 
-        const retrievedDocs: RetrievedDoc[] = sources.map((s) => ({
-          title: s.title,
-          source_ref: s.source_ref,
-          content: s.content,
-          metadata: s.metadata,
-        }));
-
-        // 4) 관련도 분기 — 내부 규정 최상위 관련도(maxScore)로 규정/법령을 가른다.
-        //    · maxScore ≥ RELEVANCE_GRAY_UPPER : 자신있는 규정 근거 → 규정 분기(게이트 생략)
-        //    · RELEVANCE_THRESHOLD ≤ maxScore < GRAY_UPPER : 회색지대 → LLM 적합성 게이트로
-        //      "규정만으로 질의 핵심에 답 가능?"을 재판정(NO면 법령). 노이즈 규정청크가
-        //      임계치를 근소하게(예: 0.35 vs 0.33) 넘겨 법령 질의를 규정으로 오라우팅하던
-        //      문제를 차단한다 — 단, 게이트는 회색지대에서만 호출해 청크 변동 민감성을 제한.
-        //    · maxScore < RELEVANCE_THRESHOLD : 규정 근거 없음 → (범위 내면) 법령 분기
-        const maxScore = sources.length > 0 ? sources[0].score : 0;
+        // 3) 관련도 판정 — 근거 없음 = 선발 0건. (완화 문턱 선발이 있는데 maxScore
+        //    비교로 범위 게이트에 새는 모순 방지. 단일 의도 경로에선 maxScore<문턱과
+        //    동치라 기존 동작 불변.) belowThreshold 는 로그 신호로만 유지.
         const belowThreshold = maxScore < env.RELEVANCE_THRESHOLD;
-        const inGrayZone =
-          !belowThreshold && maxScore < env.RELEVANCE_GRAY_UPPER;
+        const injected = picked;
 
-        // 회색지대 적합성 게이트: 규정 발췌만으로 질의 핵심에 답할 근거가 없으면(NO) 법령으로.
-        // 자신있는 고득점(≥ GRAY_UPPER) 규정은 게이트를 호출하지 않는다. 게이트 실패 시
-        // isRegulationSufficient 가 true(충분)로 폴백 → 규정 유지(게이트 장애가 답변을 막지 않음).
-        const grayZoneInsufficient = inGrayZone
-          ? !(await isRegulationSufficient(query, retrievedDocs))
-          : false;
+        // 범위 게이트: 근거가 전혀 없는 질의(잡담 포함)만 서비스 범위(법령·규정·
+        // 행정·공공기금)인지 확인한다. 범위 밖이면 근거 미주입 + 참조문서 생략으로
+        // 정중한 거절만 스트리밍한다.
+        const outOfScope = injected.length === 0 ? !(await isInScope(query)) : false;
 
-        // 범위 게이트: 규정 관련도가 낮은 질의(잡담 포함)는 법령 분기 전에 서비스
-        // 범위(법령·규정·행정·공공기금)인지 확인한다. 범위 밖이면 법령·판례 검색과
-        // 참조문서를 모두 생략하고 정중한 거절만 스트리밍한다. 회색지대(규정에 일부
-        // 관련 있어 임계치 통과)는 범위 내로 보고 범위 게이트를 생략한다.
-        const outOfScope = belowThreshold ? !(await isInScope(query)) : false;
-
-        // 법령 분기: 규정 근거 없음(belowThreshold) 또는 회색지대 게이트가 불충분 판정.
-        // 범위 밖이면 어느 쪽도 아님(거절).
-        const routedToLaw =
-          !outOfScope && (belowThreshold || grayZoneInsufficient);
-
-        // 분기·관련도·게이트 신호 기록(검색 후보는 [{id,score}] 로 경량 저장).
-        logRow.route = outOfScope ? "out_of_scope" : routedToLaw ? "law" : "regulation";
-        logRow.top_score = maxScore;
-        logRow.below_threshold = belowThreshold;
-        logRow.gate_sufficient = inGrayZone ? !grayZoneInsufficient : null;
-        logRow.out_of_scope = outOfScope;
-        logRow.retrieved = sources.map((s) => ({ id: s.id, score: s.score }));
-        logRow.retrieved_doc_ids = sources.filter((s) => s.id > 0).map((s) => s.id);
-
-        let lawContext: string | undefined;
-        // 통합: 검색(searchAiLaw)은 LLM 근거(lawContext) + 인용 검증 재사용(retrieved)
-        // 전용. 참조문서 표시는 더 이상 검색 결과를 직접 쓰지 않고, 답변이 실제 인용·검증한
-        // 조문(citationSources)만 단일 소스로 쓴다 — "표시≠사용"·노이즈 폴백 제거.
-        let lawRetrieved: RetrievedLaws | undefined;
-        let lawRefs: { name: string; lawId: string }[] = [];
-        let precedentSources: SourceChunk[] = [];
-        if (routedToLaw) {
-          // 법령과 판례를 동시 조회 (둘 다 법제처 — 병렬로 응답 전 지연 최소화).
-          const [law, precRefs] = await Promise.all([
-            searchAiLaw(query),
-            searchDecisions(query, "prec", 2),
-          ]);
-          if (law.context) lawContext = law.context;
-          lawRetrieved = law.retrieved;
-          // 검색이 찾은 법령은 라우팅 표시(routing.laws)에만 쓴다(참조 카드 아님).
-          lawRefs = law.refs.map((r) => ({ name: r.name, lawId: r.lawId }));
-
-          // 상위 판례 본문을 회수해 참조문서 + 컨텍스트로 보강 (best-effort).
-          if (precRefs.length > 0) {
-            const texts = await Promise.all(
-              precRefs.map((r) => getDecisionText(r.serial, r.domain)),
+        // 4) 주입분 → LLM 근거 + 참조 카드 동시 구성(표시=입력 단일 원칙).
+        //    규정 청크는 [내부 규정] 섹션(retrievedDocs), 법령 조문은 [법령·판례]
+        //    섹션(lawContext)으로. 카드 순서는 통합 점수순 그대로(규정·법령 혼합).
+        const sources: SourceChunk[] = [];
+        const retrievedDocs: RetrievedDoc[] = [];
+        const lawParts: string[] = [];
+        const lawRefs: { name: string; lawId: string }[] = [];
+        for (const { item, score, intent } of injected) {
+          if (item.kind === "regulation") {
+            const h = item.hit;
+            // 복합 의도면 어느 의도가 이 근거를 뽑았는지 라벨(관리자 로그·디버깅용).
+            const metadata = intent ? { ...h.metadata, intent } : h.metadata;
+            sources.push({
+              id: h.id,
+              title: h.title,
+              source_ref: h.source_ref,
+              content: h.content,
+              metadata,
+              score,
+            });
+            retrievedDocs.push({
+              title: h.title,
+              source_ref: h.source_ref,
+              content: h.content,
+              metadata,
+            });
+          } else {
+            const h = item.hit;
+            const articleKey = articleKeyOf(h);
+            // 법령 카드 id 는 규정(양수)·판례(-(100+i))와 겹치지 않는 음수 대역.
+            sources.push({
+              id: -(200 + lawParts.length),
+              title: h.name,
+              source_ref: `법제처 국가법령정보 · 법령ID ${h.lawId}`,
+              content: formatArticle(articleKey, h.articleTitle, h.body),
+              metadata: {
+                kind: "law",
+                lawId: h.lawId,
+                article: articleKey,
+                ...(intent ? { intent } : {}),
+              },
+              score,
+            });
+            lawParts.push(
+              `${lawParts.length + 1}. ${h.name} (법령ID ${h.lawId}, 관련도 ${Math.round(score * 100)}%)\n${formatArticle(articleKey, h.articleTitle, h.body)}`,
             );
-            // 판례 scope creep 방지: 판시·판결요지를 질의로 재정렬해 관련도 낮은 판례 제외.
-            // 무관 판례(예: "전담기관"에 공직선거법위반)가 참조문서로 새는 것을 차단.
-            const judged = await rerank(
-              query,
-              precRefs.map((r, i) => ({
-                id: i,
-                text: `${r.caseName}\n${texts[i]?.summary ?? ""}\n${texts[i]?.holding ?? ""}`,
-              })),
-              precRefs.length,
-            ).catch(() => precRefs.map((_, i) => ({ id: i, score: 1 }))); // 재정렬 실패 시 보존
-            const keep = new Set(
-              judged.filter((j) => j.score >= env.RELEVANCE_THRESHOLD).map((j) => j.id as number),
-            );
-            const keptRefs = precRefs.filter((_, i) => keep.has(i));
-            const keptTexts = texts.filter((_, i) => keep.has(i));
-            precedentSources = keptRefs.map((r, i) => toPrecedentSource(r, keptTexts[i], i));
-            if (keptRefs.length > 0) {
-              const precBlock = buildPrecedentContext(keptRefs, keptTexts);
-              lawContext = [lawContext, precBlock].filter(Boolean).join("\n\n");
+            if (!lawRefs.some((r) => r.lawId === h.lawId)) {
+              lawRefs.push({ name: h.name, lawId: h.lawId });
             }
           }
         }
+        let lawContext = lawParts.length > 0 ? lawParts.join("\n\n") : undefined;
 
+        // 판례 보강 — 주입분에 법령 조문이 있을 때만 본문을 회수한다(순수 규정 질의의
+        // 판례 왕복·노이즈 차단). 판시·판결요지를 질의로 재정렬해 관련도 낮은 판례 제외.
+        let precedentSources: SourceChunk[] = [];
+        if (!outOfScope && lawParts.length > 0 && precRefs.length > 0) {
+          const texts = await Promise.all(
+            precRefs.map((r) => getDecisionText(r.serial, r.domain)),
+          );
+          // 필터 실패 시 판례를 보존하되 score=0 으로(UI 는 0이면 % 미표시 — 미검증
+          // 점수를 100%처럼 표기하지 않는다).
+          let judgeFailed = false;
+          const judged = await rerank(
+            query,
+            precRefs.map((r, i) => ({
+              id: i,
+              text: `${r.caseName}\n${texts[i]?.summary ?? ""}\n${texts[i]?.holding ?? ""}`,
+            })),
+            precRefs.length,
+          ).catch(() => {
+            judgeFailed = true;
+            return precRefs.map((_, i) => ({ id: i, score: 0 }));
+          });
+          const keep = new Map(
+            judged
+              .filter((j) => judgeFailed || j.score >= env.RELEVANCE_THRESHOLD)
+              .map((j) => [j.id as number, j.score]),
+          );
+          const keptIdx = precRefs.map((_, i) => i).filter((i) => keep.has(i));
+          const keptRefs = keptIdx.map((i) => precRefs[i]);
+          const keptTexts = keptIdx.map((i) => texts[i]);
+          precedentSources = keptIdx.map((origIdx, i) =>
+            toPrecedentSource(precRefs[origIdx], texts[origIdx], i, keep.get(origIdx) ?? 0),
+          );
+          if (keptRefs.length > 0) {
+            const precBlock = buildPrecedentContext(keptRefs, keptTexts);
+            lawContext = [lawContext, precBlock].filter(Boolean).join("\n\n");
+          }
+        }
+
+        // 신호 기록 — route 는 통합 이후 "unified"/"out_of_scope" 2종(과거 행의
+        // regulation/law 는 레거시). retrieved 는 주입 카드 [{id,score}] 경량 저장.
+        logRow.route = outOfScope ? "out_of_scope" : "unified";
+        logRow.top_score = maxScore;
+        logRow.below_threshold = belowThreshold;
+        logRow.out_of_scope = outOfScope;
+        logRow.intents = intents.length >= 2 ? intents : null;
+        logRow.retrieved = [...sources, ...precedentSources].map((s) => ({
+          id: s.id,
+          score: s.score,
+        }));
+        logRow.retrieved_doc_ids = sources.filter((s) => s.id > 0).map((s) => s.id);
         logRow.law_refs = lawRefs;
 
+        const regCount = sources.length - lawParts.length;
         console.log(
-          `[chat] route=${outOfScope ? "out_of_scope" : routedToLaw ? "law" : "regulation"} maxScore=${maxScore.toFixed(3)} ` +
-            `threshold=${env.RELEVANCE_THRESHOLD} grayUpper=${env.RELEVANCE_GRAY_UPPER} ` +
-            `belowThreshold=${belowThreshold} grayZone=${inGrayZone}${inGrayZone ? `(insufficient=${grayZoneInsufficient})` : ""} ` +
-            `hits=${hits.length}` +
-            (routedToLaw ? ` laws=[${lawRefs.map((r) => r.name).join(", ")}]` : " (법제처 미호출)"),
+          `[chat] route=${outOfScope ? "out_of_scope" : "unified"} maxScore=${maxScore.toFixed(3)} ` +
+            `threshold=${env.RELEVANCE_THRESHOLD} injected=${sources.length}(규정 ${regCount}·법령 ${lawParts.length})` +
+            ` 판례=${precedentSources.length} 후보=규정 ${hits.length}·법령 ${lawCand.hits.length}` +
+            (intents.length >= 2 ? ` intents=[${intents.join(" | ")}]` : "") +
+            (lawRefs.length > 0 ? ` laws=[${lawRefs.map((r) => r.name).join(", ")}]` : ""),
         );
 
-        // 5) 답변을 먼저 스트리밍한다. (인용 검증용으로 본문을 누적)
+        // 5) 참조문서 선발송 — 통합 개편으로 표시분(주입분+판례)이 스트리밍 전에
+        //    확정되므로 delta 앞에 보낸다. 사용자가 답변 도중 '멈춤'을 눌러도 참조
+        //    패널이 유실되지 않는다(docs/08 이슈 A 해소). 범위 밖이면 빈 배열.
+        const displayedSources = outOfScope
+          ? []
+          : [...sources, ...precedentSources];
+        send(controller, { type: "sources", data: displayedSources });
+
+        // 6) 답변 스트리밍. (인용 검증용으로 본문을 누적)
         //    범위 밖이면 어떤 근거도 주지 않아, 시스템 프롬프트의 범위 밖 거절만 나오게 한다.
         let answerText = "";
-        // law 분기에선 규정 청크를 주입하지 않는다(진짜 이분법). 규정 본문이 답변에
-        // 섞이면서 출처는 법령만 표시되던 "표시≠사용" 불일치를 제거.
-        const answerDocs = outOfScope || routedToLaw ? [] : retrievedDocs;
+        const answerDocs = outOfScope ? [] : retrievedDocs;
         const answerLawContext = outOfScope ? undefined : lawContext;
         const tLlm = Date.now();
         // 제너레이터를 수동으로 구동해 텍스트 청크를 스트리밍하고, 종료 시 return 값
@@ -353,34 +528,26 @@ export async function POST(req: NextRequest) {
         logRow.tokens_in = usage?.input ?? null;
         logRow.tokens_out = usage?.output ?? null;
 
-        // 6) 법령 분기면 답변의 조문 인용을 법제처 DB와 교차 검증한다(환각 차단).
-        //    검증은 "답변이 실제 인용한 조문"을 본문과 함께 돌려주므로, 검색(aiSearch)이
-        //    끌어온 곁가지 조문 대신 이 인용 조문을 참조문서로 보여 줄 수 있다
-        //    (참조-답변 불일치 해소). 답변이 이미 스트리밍 완료된 뒤라 체감 지연 적음.
+        // 7) 인용 검증 — 답변에 등장한 「법」 제N조가 법제처에 실존하는지 교차 검증
+        //    (환각 경고 배지 전용 — 참조 카드 결정과 분리). 시스템 프롬프트가 자료 밖
+        //    인용을 금지하므로 위반 감지 = 환각 감지다. 통합 이후 모든 답변에 법령
+        //    인용이 섞일 수 있어 범위 밖만 빼고 항상 실행한다 — 인용이 0건이면 API
+        //    호출도 0회, 답변 스트리밍 완료 뒤라 체감 지연 없음. 검색 후보 전체 맵
+        //    (lawCand.retrieved)을 재사용해 후보에 있던 인용은 재조회 없이 검증.
         let citationCheck: CitationCheck | null = null;
-        if (routedToLaw) {
+        if (!outOfScope) {
           try {
-            // 검색이 이미 회수한 조문(lawRetrieved)을 재사용 — 인용이 검색 결과에 있으면
-            // 법제처 재조회 없이 검증, 없을 때만 법제처 조회(누락 보강·환각 판정).
-            citationCheck = await verifyCitations(answerText, lawRetrieved);
+            // 원질의 + 의도별 검색이 회수한 조문 전체를 재사용 맵으로 — 어느 의도의
+            // 후보든 인용되면 법제처 재조회 없이 검증된다.
+            const retrievedLaws = mergeRetrievedLaws([
+              lawCand.retrieved,
+              ...intentPools.map((p) => p.law.retrieved),
+            ]);
+            citationCheck = await verifyCitations(answerText, retrievedLaws);
           } catch (err) {
             console.error("[chat] citation verify failed:", (err as Error).message);
           }
         }
-
-        // 답변이 인용했고 법제처에 실존이 확인된 조문을, 그 본문과 함께 참조 카드로.
-        // 참조 카드는 이 단일 소스만 쓴다 — 검색 후보(노이즈)로의 폴백 없음. 관련도(score)는
-        // 법령 카드 UI에 미표시(내부 정렬용 0)라 별도 점수 매핑을 두지 않는다.
-        const citationSources: SourceChunk[] = (citationCheck?.verdicts ?? [])
-          .filter((v) => v.status === "verified" && v.body)
-          .map((v, i) => ({
-            id: -(200 + i),
-            title: v.lawName,
-            source_ref: `법제처 국가법령정보 · 법령ID ${v.lawId ?? ""}`,
-            content: formatArticle(v.article, v.articleTitle ?? "", v.body!),
-            metadata: { kind: "law", lawId: v.lawId, article: v.article, cited: true },
-            score: 0,
-          }));
 
         // 인용 검증 신호 기록(본문 body 는 제외해 로그를 가볍게).
         if (citationCheck) {
@@ -394,26 +561,8 @@ export async function POST(req: NextRequest) {
           logRow.cited_law_refs = verdicts.map(({ body: _body, ...v }) => v);
         }
 
-        // 7) 라우팅·참조문서 전송. 법령 분기는 답변이 인용·검증한 조문만 표시(검색 후보로
-        //    폴백하지 않음 — 인용이 0건이면 판례만, 그것도 없으면 빈 표시). 규정 분기면
-        //    규정 청크를. 범위 밖이면 참조문서를 일절 표시하지 않는다(빈 배열).
-        const displayedSources = outOfScope
-          ? []
-          : routedToLaw
-            ? [...citationSources, ...precedentSources]
-            : sources;
-        if (!outOfScope) {
-          send(
-            controller,
-            routedToLaw
-              ? { type: "routing", route: "law", score: maxScore, laws: lawRefs }
-              : { type: "routing", route: "regulation", score: maxScore },
-          );
-        }
-        send(controller, { type: "sources", data: displayedSources });
-
-        // 8) 인용 검증 결과(✓/✗/⚠)를 전송(UI 환각 경고용). 본문(body)은 참조 카드가
-        //    이미 싣고 있으니 이벤트에선 떼어 가볍게 보낸다.
+        // 8) 인용 검증 결과(✓/✗/⚠)를 전송(UI 환각 경고 배지 전용 — 카드 아님).
+        //    본문(body)은 이벤트에서 떼어 가볍게 보낸다.
         if (citationCheck && citationCheck.verdicts.length > 0) {
           send(controller, {
             type: "citations",
@@ -422,7 +571,7 @@ export async function POST(req: NextRequest) {
           });
           console.log(
             `[chat] citations verified=${citationCheck.verdicts.filter((v) => v.status === "verified").length}/${citationCheck.verdicts.length} ` +
-              `hallucination=${citationCheck.hasHallucination} citedSources=${citationSources.length}`,
+              `hallucination=${citationCheck.hasHallucination}`,
           );
         }
 

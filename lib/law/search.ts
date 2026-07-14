@@ -2,7 +2,6 @@ import { env } from "@/lib/env";
 import { expandLawAbbreviation } from "@/lib/law/abbreviations";
 import { buildSearchUrl, buildServiceUrl } from "@/lib/law/client";
 import { cachedGetJson } from "@/lib/law/cache";
-import { rerank } from "@/lib/ai/rerank";
 
 // 캐시 TTL: 법령 목록 6h, 법령 본문(조문)은 변동이 드물어 24h.
 const TTL_SEARCH = 6 * 3600;
@@ -361,151 +360,86 @@ export function parseAiSearchList(json: any): AiArticleHit[] {
     .filter((a) => a.lawId && a.body);
 }
 
-// aiSearch 후보 조문을 Cohere 로 질의 기준 재정렬. 법제처 의미검색은 곁가지
-// 법령을 위로 낼 수 있어(예: "야근수당"→지방공무원 수당규정), 내부 규정과 동일한
-// 잣대(rerank-v3.5)로 다시 매겨 엉뚱한 법령을 끌어내린다. 실패 시 법제처 순서 유지.
-async function rerankAiHits(
-  query: string,
-  hits: AiArticleHit[],
-): Promise<{ hit: AiArticleHit; score: number }[]> {
-  const fallback = hits.map((h, i) => ({
-    hit: h,
-    score: Number((1 - i / hits.length).toFixed(3)),
-  }));
-  try {
-    const reranked = await rerank(
-      query,
-      hits.map((h, i) => ({
-        id: i,
-        text: `${h.name} ${h.articleTitle}\n${h.body}`,
-      })),
-      hits.length,
-    );
-    if (reranked.length === 0) return fallback;
-    return reranked.map((r) => ({
-      hit: hits[r.id as number],
-      score: r.score,
-    }));
-  } catch (err) {
-    console.error(
-      "[law] aiSearch rerank 실패 — 법제처 순서 유지:",
-      (err as Error).message,
-    );
-    return fallback;
+// 조문 라벨("제56조") 문자열 생성 — route 의 통합 카드·컨텍스트 구성용으로 공개.
+export function articleKeyOf(hit: AiArticleHit): string {
+  return fmtArticleNo(hit.articleNo, hit.articleBranch);
+}
+
+// 통합 리랭킹 풀에 공급할 법령 후보. hits 는 법제처 aiSearch 원시 조문(재정렬 없음
+// — 리랭킹은 route 가 규정 청크와 한 풀에서 단 1회 수행), retrieved 는 후보 '전체'로
+// 구성한 인용 검증 재사용 맵(주입 여부와 무관 — 답변이 인용한 조문이 후보에 있으면
+// 법제처 재조회 없이 검증).
+export type AiLawCandidates = {
+  hits: AiArticleHit[];
+  retrieved: RetrievedLaws;
+};
+
+const emptyCandidates = (): AiLawCandidates => ({
+  hits: [],
+  retrieved: { nameToId: new Map(), articles: new Map() },
+});
+
+// 여러 검색(원질의 + 의도별)의 인용 검증 재사용 맵을 하나로 합친다.
+// 먼저 들어온 항목 우선(같은 법제처 데이터라 내용 차이 없음) — 인용 검증이
+// 어떤 의도의 후보든 재조회 없이 대조할 수 있게 커버리지만 넓힌다.
+export function mergeRetrievedLaws(maps: RetrievedLaws[]): RetrievedLaws {
+  const out: RetrievedLaws = { nameToId: new Map(), articles: new Map() };
+  for (const m of maps) {
+    for (const [name, id] of m.nameToId) {
+      if (!out.nameToId.has(name)) out.nameToId.set(name, id);
+    }
+    for (const [lawId, arts] of m.articles) {
+      let dst = out.articles.get(lawId);
+      if (!dst) {
+        dst = new Map();
+        out.articles.set(lawId, dst);
+      }
+      for (const [key, v] of arts) {
+        if (!dst.has(key)) dst.set(key, v);
+      }
+    }
   }
+  return out;
 }
 
 /**
- * search_ai_law — 본문 의미검색. 자연어 질의를 법제처 target=aiSearch(search=0,
- * 조문)로 보내 관련 조문을 받은 뒤, Cohere 재정렬로 질의-조문 실관련도를 매겨
- * 참조문서 관련도(LawRef.score)로 쓴다. 조문 본문이 응답에 내장되어 2차 본문
- * 호출(get_law_text) 없이 근거를 구성한다.
+ * fetchAiLawCandidates — 본문 의미검색(법제처 target=aiSearch) 원시 후보 회수.
  *
- * 같은 법령에서 1위 조문만 쓰면 답변이 인용한 조문과 어긋날 수 있어(예: 근로기준법
- * 1위가 제54조 휴게인데 답변은 제56조 가산수당), 법령당 상위 articlesPerLaw 개
- * 조문을 함께 싣는다. articles[i] ↔ refs[i] 1:1 정렬 유지.
+ * 자연어 질의를 정제(필러 제거)·약칭 확장해 법제처 의미검색에 보내고, 조문 단위
+ * 후보(본문 내장)를 그대로 반환한다. Cohere 재정렬·임계치 게이트는 하지 않는다 —
+ * 통합 파이프라인(route)이 내부 규정 청크와 같은 풀·같은 잣대로 1회 재정렬한다.
  *
- * 어드바이저 ①에서 내부 규정 관련도가 기준치 미만일 때 route 가 직접 호출한다.
- * 반환 계약은 searchLaw 와 동일(LawLookup)이라 route·verify 흐름은 그대로 작동.
+ * best-effort: 법제처 장애·무결과 시 빈 후보를 반환하고 예외를 던지지 않는다
+ * (route 는 규정 단독으로 계속 진행).
  */
-export async function searchAiLaw(
+export async function fetchAiLawCandidates(
   query: string,
   display = 50,
-  maxLaws = 3,
-  articlesPerLaw = 3,
-  // 노출 게이트는 내부 규정과 동일한 잣대(RELEVANCE_THRESHOLD)를 쓴다. 같은 Cohere
-  // 점수인데 규정은 0.33 이상이라야 "관련 있음"이고 법령은 0.05만 넘으면 권위 근거로
-  // 주입되던 비대칭을 제거 — 최상위 법조차 기준 미만이면 약한 노이즈 법(예: 채권
-  // 우선순위 질의의 0.27짜리 보증기금법)이 답변에 박혀 환각을 유발했다. 기준 미만이면
-  // 빈 결과 → route 가 "확인된 자료 없음" 정직 폴백으로 처리.
-  minScore = env.RELEVANCE_THRESHOLD,
-): Promise<LawLookup> {
+): Promise<AiLawCandidates> {
   const oc = env.LAW_GO_KR_API_KEY;
-  if (!oc || !query.trim()) return { refs: [], context: "", articles: [] };
+  if (!oc || !query.trim()) return emptyCandidates();
 
-  // 자연어 원문을 법령 검색어로 정제(필러 제거) 후 약칭→정식명 확장.
   const distilled = expandLawAbbreviation(distillLawQuery(query));
-
   const json = await cachedGetJson(
     buildSearchUrl({ oc, target: "aiSearch", query: distilled, display, search: 0 }),
     "search_ai_law",
     TTL_SEARCH,
   );
   const hits = parseAiSearchList(json);
-  if (hits.length === 0) return { refs: [], context: "", articles: [] };
+  if (hits.length === 0) return emptyCandidates();
 
-  // 질의 기준 재정렬(내림차순)도 정제 query로 — 필러가 곁가지 조문을 띄우는 것 방지.
-  const ordered = await rerankAiHits(distilled, hits);
-
-  // 출처 취지: chrisryugj/korean-law-mcp (MIT) scoreLawRelevance.
-  // Cohere 의미점수에 결정론 신호를 결합한다 — 법령'명'이 정제 키워드를 포함하면 가점
-  // (개념-법령 정합), 시행령/시행규칙은 본법 우선 위해 약한 감점(형제 타이브레이커).
-  const kw = distilled.split(/\s+/).filter((w) => w.length >= 2);
-  const adjusted = ordered
-    .map(({ hit, score }) => {
-      let s = score;
-      if (kw.some((w) => hit.name.includes(w) || w.includes(hit.name.replace(/(법률|법|시행령|시행규칙)$/, "")))) {
-        s += 0.15;
-      }
-      if (/시행령|시행규칙/.test(hit.name)) s -= 0.05;
-      return { hit, score: s };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  if (adjusted.length === 0 || adjusted[0].score < minScore) {
-    // 최상위조차 무관 → 엉뚱한 법령 노출 방지차 빈 결과.
-    return { refs: [], context: "", articles: [] };
-  }
-
-  type Group = { ref: LawRef; arts: string[] };
-  const groups = new Map<string, Group>();
-  // 인용 검증 재사용용 구조화 맵 — 표시(top-3×articlesPerLaw)에 든 조문을 본문째 적재.
   const retrieved: RetrievedLaws = { nameToId: new Map(), articles: new Map() };
-  for (const { hit: h, score } of adjusted) {
-    let g = groups.get(h.lawId);
-    if (!g) {
-      if (groups.size >= maxLaws) continue; // 이미 충분한 법령 수집됨
-      g = {
-        ref: {
-          name: h.name,
-          lawId: h.lawId,
-          promulgated: h.promulgated,
-          score: Number(Math.min(1, Math.max(0, score)).toFixed(3)), // 그 법령의 최상위(=대표) 관련도 (표시는 0~1 상한)
-        },
-        arts: [],
-      };
-      groups.set(h.lawId, g);
-      retrieved.nameToId.set(normLawName(h.name), h.lawId);
-      retrieved.articles.set(h.lawId, new Map());
+  for (const h of hits) {
+    const nameKey = normLawName(h.name);
+    if (!retrieved.nameToId.has(nameKey)) retrieved.nameToId.set(nameKey, h.lawId);
+    let arts = retrieved.articles.get(h.lawId);
+    if (!arts) {
+      arts = new Map();
+      retrieved.articles.set(h.lawId, arts);
     }
-    if (g.arts.length >= articlesPerLaw) continue;
-    const articleKey = fmtArticleNo(h.articleNo, h.articleBranch);
-    const label = h.articleTitle ? `${articleKey}(${h.articleTitle})` : articleKey;
-    // 조문 제목은 볼드 헤더로, 본문은 항별 줄바꿈으로 — 패널에서 규정 문서처럼 보이게.
-    g.arts.push(`**${label}**\n\n${clipText(cleanArticleBody(h.body), 500)}`);
-    // verify 재사용용 원본(raw body) 저장 — formatArticle 이 자체적으로 cleanArticleBody 처리.
-    retrieved.articles.get(h.lawId)!.set(articleKey, { title: h.articleTitle, body: h.body });
+    const key = articleKeyOf(h);
+    if (!arts.has(key)) arts.set(key, { title: h.articleTitle, body: h.body });
   }
-
-  const refs: LawRef[] = [];
-  const articles: string[] = [];
-  for (const g of groups.values()) {
-    refs.push(g.ref);
-    articles.push(g.arts.join("\n\n"));
-  }
-  console.log(
-    `[law] aiSearch: 후보 ${hits.length}건 → 법령=[${refs
-      .map((r) => `${r.name}(${Math.round((r.score ?? 0) * 100)}%)`)
-      .join(", ")}]`,
-  );
-
-  const context = refs
-    .map(
-      (r, i) =>
-        `${i + 1}. ${r.name} (법령ID ${r.lawId}, 관련도 ${Math.round(
-          (r.score ?? 0) * 100,
-        )}%)\n${articles[i]}`,
-    )
-    .join("\n\n");
-  return { refs, context, articles, retrieved };
+  console.log(`[law] aiSearch 후보 ${hits.length}건 (통합 리랭킹 풀 공급)`);
+  return { hits, retrieved };
 }

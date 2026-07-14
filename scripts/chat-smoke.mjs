@@ -19,15 +19,18 @@ async function ask(q) {
   });
   const text = await res.text();
   const ev = text.split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-  const r = ev.find((e) => e.type === "routing");
+  // 통합 파이프라인(routing 이벤트 폐지): 소스 구성으로 라우팅 상태를 유추한다.
+  // sources 0건 = 범위밖 거절 또는 근거 미주입 정직 답변.
   const s = ev.find((e) => e.type === "sources");
   const c = ev.find((e) => e.type === "citations");
-  const kinds = (s?.data ?? []).map((x) => `${x.metadata?.kind ?? "reg"}:${typeof x.score === "number" ? x.score.toFixed(2) : x.score}`);
+  const data = s?.data ?? [];
+  const kinds = data.map((x) => `${x.metadata?.kind ?? "reg"}:${typeof x.score === "number" ? x.score.toFixed(2) : x.score}`);
+  const laws = [...new Set(data.filter((x) => x.metadata?.kind === "law").map((x) => x.title))];
   return {
     q,
-    route: r?.route ?? "(refuse)",
-    score: r?.score?.toFixed?.(3) ?? "-",
-    laws: (r?.laws ?? []).map((l) => l.name).join(" | "),
+    route: data.length > 0 ? "unified" : "(no-context)",
+    score: typeof data[0]?.score === "number" ? data[0].score.toFixed(3) : "-",
+    laws: laws.join(" | "),
     sources: kinds.join(", ") || "0",
     halluc: c?.hasHallucination ?? false,
   };

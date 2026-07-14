@@ -10,11 +10,13 @@ export type QueryLogRow = {
   answer?: string | null;
   message_count?: number | null;
   answer_truncated?: boolean | null;
-  route?: "regulation" | "law" | "out_of_scope" | null;
+  // "unified"(통합 검색, 2026-07 개편 이후) — 과거 행은 "regulation"/"law"(레거시 분기).
+  route?: "unified" | "regulation" | "law" | "out_of_scope" | null;
   top_score?: number | null;
   below_threshold?: boolean | null;
   gate_sufficient?: boolean | null;
   out_of_scope?: boolean | null;
+  intents?: unknown; // jsonb string[] — 복합 질의 의도 분해 결과(단일 의도면 null)
   retrieved?: unknown; // jsonb [{id, score}]
   retrieved_doc_ids?: number[] | null;
   law_refs?: unknown; // jsonb [{name, lawId}]
@@ -66,7 +68,7 @@ export type SortKey = "created_at" | "top_score" | "total_ms" | "tokens" | "feed
 export type QueryLogFilter = {
   limit?: number;
   offset?: number; // 페이징 시작 위치. 지정 시 range(offset, offset+limit-1) 로 조회.
-  route?: "regulation" | "law" | "out_of_scope";
+  route?: "unified" | "regulation" | "law" | "out_of_scope";
   hallucinationOnly?: boolean;
   negativeOnly?: boolean; // feedback = -1 (👎) 만
   ip?: string;
@@ -121,7 +123,7 @@ export type QueryLogListItem = {
   created_at: string;
   ip: string | null;
   query: string;
-  route: "regulation" | "law" | "out_of_scope" | null;
+  route: "unified" | "regulation" | "law" | "out_of_scope" | null;
   top_score: number | null;
   has_hallucination: boolean | null;
   total_ms: number | null;
@@ -139,6 +141,7 @@ export type QueryLogDetail = QueryLogListItem & {
   below_threshold: boolean | null;
   gate_sufficient: boolean | null;
   out_of_scope: boolean | null;
+  intents: unknown; // string[] | null — 복합 질의 의도 분해 결과
   retrieved: unknown;
   retrieved_doc_ids: number[] | null;
   law_refs: unknown;
@@ -198,7 +201,7 @@ export type QueryLogStats = {
   total: number; // 사용량(질의 수)
   distinctUsers: number; // 이용자 수 = 고유 IP 수(로그인 없음)
   avgPerUser: number | null; // 이용률 = 총 질의 / 고유 이용자
-  byRoute: { regulation: number; law: number; out_of_scope: number; unknown: number };
+  byRoute: { unified: number; regulation: number; law: number; out_of_scope: number; unknown: number };
   hallucinationCount: number;
   citationCount: number; // 인용 총 개수(검증 대상)
   citationVerifiedCount: number; // 그중 인용 검증 통과 개수
@@ -273,7 +276,7 @@ export async function queryLogStats(
     feedback: number | null;
   }>;
 
-  const byRoute = { regulation: 0, law: 0, out_of_scope: 0, unknown: 0 };
+  const byRoute = { unified: 0, regulation: 0, law: 0, out_of_scope: 0, unknown: 0 };
   const users = new Set<string>();
   const times: number[] = [];
   let hallucinationCount = 0;
@@ -290,7 +293,7 @@ export async function queryLogStats(
   for (const r of rows) {
     if (r.ip) users.add(r.ip);
     times.push(new Date(r.created_at).getTime());
-    if (r.route === "regulation" || r.route === "law" || r.route === "out_of_scope") {
+    if (r.route === "unified" || r.route === "regulation" || r.route === "law" || r.route === "out_of_scope") {
       byRoute[r.route] += 1;
     } else {
       byRoute.unknown += 1;

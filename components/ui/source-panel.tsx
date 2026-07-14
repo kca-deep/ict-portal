@@ -79,13 +79,14 @@ export function SourcePanel({
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-border bg-accent text-accent-foreground shadow-[7px_7px_8px_-1px_rgba(0,0,0,0.25)] ring-1 ring-black/5">
           {/* 헤더: 뱃지(종류·관련도) · 제목 · 닫기 */}
           <div className="flex items-start gap-3 border-b border-border px-8 py-5 shrink-0">
-            {/* 종류 + 관련도(내부 규정만)를 한 뱃지 카드 안에 줄바꿈으로 표시 */}
+            {/* 종류 + 관련도를 한 뱃지 카드 안에 줄바꿈으로 표시 */}
             <span className="mt-0.5 inline-flex shrink-0 flex-col items-center gap-0.5 rounded-xl bg-card px-2.5 py-1 text-accent-foreground">
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold">
                 <span aria-hidden>{badge.icon}</span>
                 {badge.label}
               </span>
-              {kind === "regulation" && (
+              {/* 통합 리랭킹 이후 법령·판례도 동일 잣대 관련도를 갖는다(0이면 생략). */}
+              {source.score > 0 && (
                 <span className="text-[10px] font-medium tabular-nums text-muted-foreground">
                   관련도 {percent}%
                 </span>

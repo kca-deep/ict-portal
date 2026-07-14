@@ -43,5 +43,5 @@ const PROMPTS = loadPrompts();
 
 export const SYSTEM_PROMPT = requireSection(PROMPTS, "advisor");
 export const CHAT_SYSTEM_PROMPT = requireSection(PROMPTS, "chat");
-export const RELEVANCE_GATE_PROMPT = requireSection(PROMPTS, "relevance-gate");
 export const SCOPE_GATE_PROMPT = requireSection(PROMPTS, "scope-gate");
+export const INTENT_DECOMPOSE_PROMPT = requireSection(PROMPTS, "intent-decompose");

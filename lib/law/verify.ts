@@ -40,11 +40,16 @@ export type CitationCheck = {
 // 쉼표·마침표·따옴표는 문자클래스에서 제외해 문장 경계를 넘지 않는다. 앞 단어가 섞이는
 // 과포착은 resolveLaw 의 앞토큰 제거 재시도로 흡수한다.
 // 법령명 뒤에 닫는 낫표(」』】)·따옴표가 올 수 있다("「근로기준법」 제56조") — 조 앞에서 허용.
+// 법령명과 조문 사이 마크다운 강조(**제19조**, _제19조_)도 허용한다 — 답변이 조문을
+// 볼드 처리하면 인용이 추출되지 않아 환각 경고가 통째로 빠지는 누락을 막는다.
 // 대용어는 "같은 법 시행령 제N조"처럼 시행령·시행규칙 접미사를 허용한다. 이 접미사가
 // 일반 법령명 분기로 새서 "시행령" 한 단어로 축약되면 엉뚱한 시행령에 매칭되므로,
 // 대용어 분기를 일반 분기보다 먼저 두어 직전 본법의 시행령으로 바인딩되게 한다.
+// 접미사에 "규정"도 포함한다 — 「공무원수당 등에 관한 규정」처럼 대통령령급 법령의
+// 상당수가 규정으로 끝나, 빠뜨리면 해당 인용이 검증(환각 경고)에서 통째로 누락된다.
+// 무변별 단독 토큰("규정 제N조")은 parseCitations 에서 스킵해 오검증을 막는다.
 const CITATION_RE =
-  /(?<law>같은\s*법(?:\s*시행(?:령|규칙))?|동법(?:\s*시행(?:령|규칙))?|(?:[가-힣A-Za-z0-9·()]+\s+)*[가-힣A-Za-z0-9·()]*(?:법률|법|령|규칙|조례))\s*[」』】"']?\s*제(?<no>\d+)조(?:의(?<branch>\d+))?/g;
+  /(?<law>같은\s*법(?:\s*시행(?:령|규칙))?|동법(?:\s*시행(?:령|규칙))?|(?:[가-힣A-Za-z0-9·()]+\s+)*[가-힣A-Za-z0-9·()]*(?:법률|법|령|규칙|조례|규정))\s*[」』】"']?[\s*_]*제(?<no>\d+)조(?:의(?<branch>\d+))?/g;
 
 type ParsedCitation = { raw: string; lawName: string; article: string };
 
@@ -73,6 +78,9 @@ function parseCitations(text: string): ParsedCitation[] {
       lawName = suffix ? `${baseAct} ${suffix}` : currentLaw;
       displayLaw = suffix ? `${ana[1]} ${suffix}` : ana[1];
     } else {
+      // 무변별 단독 토큰("규정 제19조", "법 제3조" 등)은 어느 법령인지 특정 불가 —
+      // lookupRetrieved 의 포함매칭이 엉뚱한 법령에 오검증할 수 있어 스킵한다.
+      if (GENERIC_LAW_TOKENS.has(lawToken)) continue;
       currentLaw = expandLawAbbreviation(lawToken);
       if (!currentLaw) continue;
       lawName = currentLaw;

@@ -2,7 +2,7 @@
  * search_ai_law(본문 의미검색) 라이브 진단 스크립트.
  *
  * 목적: 법제처 target=aiSearch 의 실제 응답 스키마를 눈으로 확인하고,
- *       우리 parseAiSearchList / searchAiLaw 가 0건이 아닌지 검증한다.
+ *       우리 parseAiSearchList / fetchAiLawCandidates 가 0건이 아닌지 검증한다.
  *
  * 실행: pnpm exec tsx scripts/test-ai-law.ts "야근수당 안 주면 불법인가요?"
  */
@@ -10,7 +10,7 @@ import "./_load-env";
 
 import { env } from "@/lib/env";
 import { buildSearchUrl, getJson } from "@/lib/law/client";
-import { parseAiSearchList, searchAiLaw } from "@/lib/law/search";
+import { parseAiSearchList, fetchAiLawCandidates, articleKeyOf } from "@/lib/law/search";
 
 async function main() {
   const q = process.argv[2] ?? "야근수당 안 주면 불법인가요?";
@@ -37,18 +37,16 @@ async function main() {
   console.log(`\n▶ parseAiSearchList 결과: ${hits.length}건`);
   console.log(hits.slice(0, 3));
 
-  const lookup = await searchAiLaw(q);
-  console.log(`\n▶ searchAiLaw refs: ${lookup.refs.length}건`);
-  lookup.refs.forEach((r, i) => {
-    console.log(
-      `\n  [${Math.round((r.score ?? 0) * 100)}%] ${r.name} (법령ID ${r.lawId})`,
-    );
-    const arts = (lookup.articles[i] ?? "")
-      .split("\n")
-      .filter((l) => l.startsWith("["))
-      .join("\n   ");
-    console.log(`   ${arts}`);
-  });
+  // 통합 파이프라인의 실제 공급 함수 — 원시 후보 + 인용 검증 재사용 맵.
+  const cand = await fetchAiLawCandidates(q);
+  console.log(`\n▶ fetchAiLawCandidates hits: ${cand.hits.length}건`);
+  for (const h of cand.hits.slice(0, 10)) {
+    console.log(`  · ${h.name} ${articleKeyOf(h)}${h.articleTitle ? `(${h.articleTitle})` : ""}`);
+  }
+  console.log(
+    `▶ retrieved 맵: 법령 ${cand.retrieved.articles.size}종, ` +
+      `조문 ${[...cand.retrieved.articles.values()].reduce((n, m) => n + m.size, 0)}건`,
+  );
 }
 
 main().catch((e) => {
