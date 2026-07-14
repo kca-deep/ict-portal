@@ -87,6 +87,19 @@ function mergeLawHits(primary: AiArticleHit[], extra: AiArticleHit[]): AiArticle
   return [...primary, ...extra.filter((h) => !seen.has(key(h)))];
 }
 
+// 참조문서(주입분) 구성으로 route 를 분기한다 — 관리자 대시보드 분기 분포·필터의
+// 변별력 확보. 규정만=regulation, 법령만=law, 섞이면=unified. 판례는 법령이 있을 때만
+// 붙으므로 별도 분기 축이 아니다(법령 쪽에 흡수). 근거 0건(범위 내)은 중립적으로 unified.
+function routeFromComposition(
+  regCount: number,
+  lawCount: number,
+): "unified" | "regulation" | "law" {
+  if (regCount > 0 && lawCount > 0) return "unified";
+  if (lawCount > 0) return "law";
+  if (regCount > 0) return "regulation";
+  return "unified";
+}
+
 // 규정 청크 + 법령 조문을 한 풀에서 Cohere로 1회 재정렬해 상위 RERANK_TOP_K건 반환
 // (내림차순). 소스 간 동일 잣대 점수라 규정·법령이 순수 점수순으로 경쟁한다.
 // 재정렬 실패 시 교차 소스 점수가 없으므로 법령을 버리고 규정 RRF 순으로 폴백.
@@ -367,7 +380,9 @@ export async function POST(req: NextRequest) {
             }
             if (!any) break;
           }
-          picked = order.map((k) => byKey.get(k)!);
+          // 전역 캡 — 의도별 상한 인터리브가 RERANK_TOP_K 를 넘지 않도록 최종 절단
+          //  (참조문서 = 리랭크 상위 RERANK_TOP_K건 원칙을 복합 의도 경로에도 강제).
+          picked = order.map((k) => byKey.get(k)!).slice(0, env.RERANK_TOP_K);
         }
         logRow.rerank_ms = Date.now() - tRerank;
 
@@ -473,9 +488,8 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // 신호 기록 — route 는 통합 이후 "unified"/"out_of_scope" 2종(과거 행의
-        // regulation/law 는 레거시). retrieved 는 주입 카드 [{id,score}] 경량 저장.
-        logRow.route = outOfScope ? "out_of_scope" : "unified";
+        // 신호 기록 — retrieved 는 주입 카드 [{id,score}] 경량 저장. route 는 아래
+        // 참조문서 구성이 확정된 뒤 분기한다(규정/법령/통합).
         logRow.top_score = maxScore;
         logRow.below_threshold = belowThreshold;
         logRow.out_of_scope = outOfScope;
@@ -488,8 +502,13 @@ export async function POST(req: NextRequest) {
         logRow.law_refs = lawRefs;
 
         const regCount = sources.length - lawParts.length;
+        const lawCount = lawParts.length;
+        // 참조문서 구성 기반 분기 — 규정만/법령만/혼합 = regulation/law/unified.
+        logRow.route = outOfScope
+          ? "out_of_scope"
+          : routeFromComposition(regCount, lawCount);
         console.log(
-          `[chat] route=${outOfScope ? "out_of_scope" : "unified"} maxScore=${maxScore.toFixed(3)} ` +
+          `[chat] route=${logRow.route} maxScore=${maxScore.toFixed(3)} ` +
             `threshold=${env.RELEVANCE_THRESHOLD} injected=${sources.length}(규정 ${regCount}·법령 ${lawParts.length})` +
             ` 판례=${precedentSources.length} 후보=규정 ${hits.length}·법령 ${lawCand.hits.length}` +
             (intents.length >= 2 ? ` intents=[${intents.join(" | ")}]` : "") +
