@@ -44,7 +44,7 @@ pnpm db:reset     # DB 초기화
 
 진입점은 `app/api/*/route.ts`. 도메인 로직은 `lib/`에 모이고, App Router는 thin handler만.
 
-- `app/api/chat` → `lib/ai`(OpenAI 임베딩 · Cohere 재정렬 · Claude LLM) + `lib/db/search.ts`(hybrid_search / regulation_search RPC). 흐름: 내부 규정 검색 → Cohere Rerank → 관련도 분기(기준치 이상=내부 규정 근거 / 미만=법제처 OpenAPI 직접 호출로 법령·판례 조회 + 인용 검증) → Claude 스트리밍. `query_log` 비동기 적재(관리자 로그 원천). ※ 오픈 전 하드닝 필요: 로그인 게이트·레이트리밋·에러 일반화(`docs/07` 참조).
+- `app/api/chat` → `lib/ai`(OpenAI 임베딩 · Cohere 재정렬 · Claude LLM) + `lib/db/search.ts`(hybrid_search / regulation_search RPC). 흐름(2026-07 통합 개편): 내부 규정 + 법제처 법령 조문 **병렬 검색 → 단일 풀 Cohere 통합 리랭킹 → 기준치 이상 top-K(규정·법령 혼합) 주입** → Claude 스트리밍(자료 밖 조문 인용 금지 프롬프트) → 인용 검증(환각 경고 배지 전용). 참조문서=주입분 그대로(표시=입력), 규정/법령 이분법 분기 없음. `query_log` 비동기 적재(route=unified/out_of_scope, 관리자 로그 원천). 상세 순서도 `docs/09`. ※ 오픈 전 하드닝 필요: 로그인 게이트·레이트리밋·에러 일반화(`docs/07` 참조).
 - `app/api/ingest` → 64건 단위 배치 임베딩 후 `documents` 적재. ※ 외부 노출 금지 — 관리자 전용/스크립트 전용화 대상.
 - `app/api/cron/*` → Vercel Cron으로 ② 크롤러 / 법령 캐시 갱신.
 - `app/api/duplicate-check` → ③ 중복수혜 (placeholder, 선택 기능).
