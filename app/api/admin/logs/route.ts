@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ADMIN_COOKIE, verifySession } from "@/lib/admin-auth";
+import { adminCookieName, adminSessionSecret, verifySession } from "@/lib/admin-auth";
 import { listQueryLogs, type QueryLogFilter, type SortKey } from "@/lib/db/query-log";
 
 // 대시보드 로그 표 페이징 API. offset/limit 로 한 페이지를 반환한다(페이지 크기는
@@ -11,8 +11,8 @@ export const runtime = "nodejs";
 const ALLOWED_LIMITS = [20, 50, 100, 200, 300];
 
 export async function GET(req: NextRequest) {
-  const secret = process.env.ADMIN_PASSWORD;
-  const token = req.cookies.get(ADMIN_COOKIE)?.value;
+  const secret = adminSessionSecret();
+  const token = req.cookies.get(adminCookieName())?.value;
   const authed = !!secret && !!token && (await verifySession(token, secret));
   if (!authed) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

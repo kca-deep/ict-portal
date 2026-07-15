@@ -7,7 +7,21 @@
 // 서명 키는 별도 시크릿 env 없이 ADMIN_PASSWORD 자체를 쓴다(비번을 아는 것이 신뢰
 // 기준이므로 충분). 비번을 바꾸면 기존 세션은 자동 무효화된다.
 
-export const ADMIN_COOKIE = "pims_admin";
+// 관리자 세션 쿠키명. 프로덕션은 `__Host-` 프리픽스로 강화한다 — 브라우저가
+// Secure + Path=/ + Domain 미지정을 강제해 하위 도메인發 쿠키 주입을 차단한다.
+// 로컬(http)은 Secure 쿠키가 저장 안 되므로 프리픽스 없이 둔다.
+export function adminCookieName(): string {
+  return process.env.NODE_ENV === "production" ? "__Host-pims_admin" : "pims_admin";
+}
+
+/**
+ * 세션 서명 키 — ADMIN_SESSION_SECRET 우선, 없으면 ADMIN_PASSWORD 로 폴백.
+ * 상용에선 비번과 분리(비번 변경이 세션을 깨지 않고, 키 유출 대응을 분리).
+ * env 를 import 하지 않아 미들웨어 번들을 가볍게 유지(process.env 직접 읽음).
+ */
+export function adminSessionSecret(): string | undefined {
+  return process.env.ADMIN_SESSION_SECRET || process.env.ADMIN_PASSWORD || undefined;
+}
 
 /** 관리자 세션 유효기간(발급 시점부터). */
 export const ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 8; // 8시간
