@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 기획·아키텍처 의사결정의 진실원은 `docs/`. 본 파일은 코드 작업용 요약이며, 의사결정 근거가 필요하면 해당 문서를 우선 참조.
 
-**현황·로드맵**: 챗봇 핵심(검색·재정렬·스트리밍 UI)은 개발완료 상태. 이용 대상은 **ICT기금 외부 기관 담당자**(로그인 필수, 공개 가입 차단, 초대·승인 기반 계정). AI 챗봇 개발완료 6월 말 → Vercel 오픈 환경설정·취약점 하드닝 → 정식 오픈 7월 말. 크롤러 8월 말, 중복수혜 8월 이후 선택.
+**현황·로드맵**: 챗봇 핵심(검색·재정렬·스트리밍 UI)은 개발완료 상태. 이용 대상은 **ICT기금 외부 기관 담당자**. **인증 모델은 no-login(로그인 없음)** — 사용자는 로그인 없이 이용하고 식별은 **요청 IP**로 한다(감사 로그·레이트리밋 키). 사용자 계정·RLS 역할 분리는 쓰지 않는다. 공개(no-login) 챗 엔드포인트가 유료 LLM을 부르므로 **레이트리밋·비용가드·봇차단이 핵심 방어선**이다(Upstash Redis · Vercel BotID/WAF). **관리자 화면(`/admin`)만** 아이디+비밀번호 + 서명 `__Host-` httpOnly 쿠키로 보호한다. AI 챗봇 개발완료 6월 말 → Vercel 오픈 환경설정·상용 하드닝 → 정식 오픈 7월 말. 크롤러 8월 말, 중복수혜 8월 이후 선택.
 
 ## 기술 스택
 
@@ -38,13 +38,13 @@ pnpm db:reset     # DB 초기화
 
 테스트 셋업 없음 (PoC 단계). 동작 검증은 `pnpm build` + 로컬 `pnpm dev`로 직접 호출.
 
-환경변수는 `.env.local`(로컬) / Vercel(원격). `lib/env.ts`에서 zod로 검증되며, 누락 시 부팅 실패. 필요 키: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`(임베딩), `COHERE_API_KEY`(재정렬), `ANTHROPIC_API_KEY`(LLM), `LAW_GO_KR_API_KEY`(법제처). 임베딩 모델: `EMBEDDING_MODEL=text-embedding-3-small`, `EMBEDDING_DIMENSIONS=1024`.
+환경변수는 `.env.local`(로컬) / Vercel(원격). `lib/env.ts`에서 zod로 검증되며, 프로덕션은 핵심 키 누락 시 부팅 실패(superRefine). 필요 키: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`(임베딩), `COHERE_API_KEY`(재정렬), `ANTHROPIC_API_KEY`(LLM), `LAW_GO_KR_API_KEY`(법제처), `ADMIN_USERNAME`·`ADMIN_PASSWORD`(관리자 로그인, 프로덕션 필수), `UPSTASH_REDIS_REST_URL`·`UPSTASH_REDIS_REST_TOKEN`(레이트리밋·비용가드 저장소, 프로덕션 필수). 선택: `ADMIN_SESSION_SECRET`(세션 서명키 분리), `RESEND_API_KEY`·`ALERT_EMAIL_FROM`·`ALERT_EMAIL_TO`(비용 경고 이메일), `INGEST_SECRET`(색인 API 잠금). 임베딩 모델: `EMBEDDING_MODEL=text-embedding-3-small`, `EMBEDDING_DIMENSIONS=1024`.
 
 ## 아키텍처 핵심
 
 진입점은 `app/api/*/route.ts`. 도메인 로직은 `lib/`에 모이고, App Router는 thin handler만.
 
-- `app/api/chat` → `lib/ai`(OpenAI 임베딩 · Cohere 재정렬 · Claude LLM) + `lib/db/search.ts`(hybrid_search / regulation_search RPC). 흐름(2026-07 통합 개편): 내부 규정 + 법제처 법령 조문 **병렬 검색 → 단일 풀 Cohere 통합 리랭킹 → 기준치 이상 top-K(규정·법령 혼합) 주입** → Claude 스트리밍(자료 밖 조문 인용 금지 프롬프트) → 인용 검증(환각 경고 배지 전용). 참조문서=주입분 그대로(표시=입력), 규정/법령 이분법 분기 없음. `query_log` 비동기 적재(route=unified/out_of_scope, 관리자 로그 원천). 상세 순서도 `docs/09`. ※ 오픈 전 하드닝 필요: 로그인 게이트·레이트리밋·에러 일반화(`docs/07` 참조).
+- `app/api/chat` → `lib/ai`(OpenAI 임베딩 · Cohere 재정렬 · Claude LLM) + `lib/db/search.ts`(hybrid_search / regulation_search RPC). 흐름(2026-07 통합 개편): 내부 규정 + 법제처 법령 조문 **병렬 검색 → 단일 풀 Cohere 통합 리랭킹 → 기준치 이상 top-K(규정·법령 혼합) 주입** → Claude 스트리밍(자료 밖 조문 인용 금지 프롬프트) → 인용 검증(환각 경고 배지 전용). 참조문서=주입분 그대로(표시=입력), 규정/법령 이분법 분기 없음. `query_log` 비동기 적재(route=unified/out_of_scope, 관리자 로그 원천). 상세 순서도 `docs/09`. **진입 가드(순서대로)**: BotID 봇차단 → 레이트리밋(IP 분당·IP 일일·전역 일일, Upstash) → 비용가드(일일 토큰 예산, 초과 시 429·이메일 경고) → 입력 캡 → 스트림. 에러는 일반화(원문은 서버 로그). 상세 `docs/07`.
 - `app/api/ingest` → 64건 단위 배치 임베딩 후 `documents` 적재. ※ 외부 노출 금지 — 관리자 전용/스크립트 전용화 대상.
 - `app/api/cron/*` → Vercel Cron으로 ② 크롤러 / 법령 캐시 갱신.
 - `app/api/duplicate-check` → ③ 중복수혜 (placeholder, 선택 기능).
