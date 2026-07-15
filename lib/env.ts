@@ -40,10 +40,30 @@ const envSchema = z.object({
   MAX_TURNS: z.coerce.number().default(30),
   MAX_CONTENT_CHARS: z.coerce.number().default(8000),
 
-  // IP 레이트리밋 — RATE_LIMIT_ENABLED="true" 일 때만 활성(기본 비활성, 기존 동작 유지).
+  // ── 레이트리밋·비용 가드 (Upstash Redis) ──────────────────────────────────
+  // 공개(no-login) 챗 엔드포인트의 핵심 방어선. 저장소는 Upstash Redis.
+  // 프로덕션은 기본 활성(RATE_LIMIT_ENABLED="false" 로만 해제), 로컬은 opt-in("true").
   RATE_LIMIT_ENABLED: z.string().optional(),
-  RATE_LIMIT_PER_MIN: z.coerce.number().default(20),
-  RATE_LIMIT_DAILY_CAP: z.coerce.number().default(2000),
+  UPSTASH_REDIS_REST_URL: z.string().url().optional(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
+  RATE_LIMIT_PER_MIN: z.coerce.number().default(20), // IP 분당 요청(슬라이딩 윈도)
+  RATE_LIMIT_IP_DAILY_CAP: z.coerce.number().default(500), // IP 일일 요청
+  RATE_LIMIT_DAILY_CAP: z.coerce.number().default(2000), // 전역 일일 요청
+  // 비용 가드 — 일일 토큰 예산(입력+출력). 초과 시 429.
+  COST_IP_DAILY_TOKENS: z.coerce.number().default(200_000), // IP 일일 토큰
+  COST_GLOBAL_DAILY_TOKENS: z.coerce.number().default(5_000_000), // 전역 일일 토큰
+  // 예산 대비 이 비율을 넘으면 관리자 이메일 경고(하루 1회). 0~1.
+  ALERT_COST_THRESHOLD: z.coerce.number().min(0).max(1).default(0.8),
+
+  // ── 알림 (Resend 이메일) ──────────────────────────────────────────────────
+  // 비용·남용 임계치 초과 경고. 키가 없으면 no-op(로컬 안전).
+  RESEND_API_KEY: z.string().optional(),
+  ALERT_EMAIL_FROM: z.string().optional(), // 인증된 발신 도메인 주소
+  ALERT_EMAIL_TO: z.string().optional(), // 관리자 수신 주소
+
+  // 관리자 세션 서명 키 — 미설정 시 ADMIN_PASSWORD 로 폴백(비번 변경=세션 무효화).
+  // 상용에선 비번과 분리해 설정(비번을 바꿔도 세션 유지, 키 유출 대응 분리).
+  ADMIN_SESSION_SECRET: z.string().optional(),
 
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
   EMBEDDING_DIMENSIONS: z.coerce.number().default(1024),
@@ -73,6 +93,10 @@ const envSchema = z.object({
     "LAW_GO_KR_API_KEY", // 법제처 조회
     "ADMIN_USERNAME", // 관리자 페이지 보호(아이디)
     "ADMIN_PASSWORD", // 관리자 페이지 보호(비밀번호)
+    // 공개(no-login) 엔드포인트의 핵심 방어선 — 상용에선 저장소가 반드시 있어야
+    // 레이트리밋·비용가드가 실효(없으면 프로덕션 fail-closed 로 챗이 막힘).
+    "UPSTASH_REDIS_REST_URL",
+    "UPSTASH_REDIS_REST_TOKEN",
   ] as const;
   for (const key of required) {
     if (!val[key]) {
