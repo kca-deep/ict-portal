@@ -28,8 +28,10 @@ import {
   type CitationVerdict,
   type CitationCheck,
 } from "@/lib/law/verify";
+import { checkBotId } from "botid/server";
 import { env } from "@/lib/env";
 import { checkRateLimit } from "@/lib/security/ratelimit";
+import { checkCostBudget, recordTokens } from "@/lib/security/cost-guard";
 import { logQuery, type QueryLogRow } from "@/lib/db/query-log";
 
 export const runtime = "nodejs";
@@ -217,6 +219,13 @@ function isValidMessages(value: unknown): value is ChatMessage[] {
 }
 
 export async function POST(req: NextRequest) {
+  // 봇 차단(Vercel BotID) — 자동화 트래픽을 처리·과금 전에 거른다. 로컬/미배포
+  // 환경에서는 SDK 가 통과로 동작한다. 클라이언트 신호는 layout 의 <BotIdClient> 가 수집.
+  const bot = await checkBotId();
+  if (bot.isBot) {
+    return new Response("forbidden", { status: 403 });
+  }
+
   let body: ChatRequest;
   try {
     body = (await req.json()) as ChatRequest;
@@ -230,10 +239,15 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // 레이트리밋(활성 시). 비활성이면 checkRateLimit 이 즉시 통과(기존 동작 유지).
+  // 레이트리밋 + 비용 예산(활성 시). 무인증 유료 엔드포인트의 핵심 방어선 —
+  // 요청 수(분당·일일)와 실제 토큰 소비(일일)를 각각 통제한다. 프로덕션은 저장소
+  // 오류 시 fail-closed(비용 보호 우선). 비활성이면 즉시 통과(로컬 개발).
   const clientIp = clientIpFrom(req);
   if (!(await checkRateLimit(clientIp)).ok) {
     return new Response("rate limit exceeded", { status: 429 });
+  }
+  if (!(await checkCostBudget(clientIp)).ok) {
+    return new Response("daily budget exceeded", { status: 429 });
   }
 
   const lastUser = [...body.messages].reverse().find((m) => m.role === "user");
@@ -547,6 +561,10 @@ export async function POST(req: NextRequest) {
         logRow.tokens_in = usage?.input ?? null;
         logRow.tokens_out = usage?.output ?? null;
 
+        // 비용 가드: 소비 토큰(입력+출력)을 일일 예산에 누적(fire-and-forget). 임계치
+        // 교차 시 관리자 이메일 경고. 응답 스트림을 지연시키지 않도록 await 하지 않는다.
+        void recordTokens(clientIp, (usage?.input ?? 0) + (usage?.output ?? 0));
+
         // 7) 인용 검증 — 답변에 등장한 「법」 제N조가 법제처에 실존하는지 교차 검증
         //    (환각 경고 배지 전용 — 참조 카드 결정과 분리). 시스템 프롬프트가 자료 밖
         //    인용을 금지하므로 위반 감지 = 환각 감지다. 통합 이후 모든 답변에 법령
@@ -604,8 +622,15 @@ export async function POST(req: NextRequest) {
 
         send(controller, { type: "done" });
       } catch (err) {
+        // 오류 원문은 서버 로그에만 남기고, 클라이언트에는 일반화된 문구만 보낸다
+        // (docs/07 §11 Critical — DB·외부 API 오류 원문 비노출). 원인 추적용 name 은
+        // 관리자 로그(query_log.error_code)에만 적재되고 응답 본문엔 나가지 않는다.
         logRow.error_code = (err as Error).name || "stream_error";
-        send(controller, { type: "error", message: (err as Error).message });
+        console.error("[chat] stream failed:", err);
+        send(controller, {
+          type: "error",
+          message: "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+        });
       } finally {
         // 에러 등으로 아직 적재 안 됐으면 fire-and-forget 로 남긴다(응답 지연 없음).
         if (!logged) {
