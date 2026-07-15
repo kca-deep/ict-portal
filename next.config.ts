@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withBotId } from "botid/next/config";
 
 const nextConfig: NextConfig = {
   // 시스템 프롬프트(prompts/*.md)는 fs로 동적 로드 — Vercel 서버리스 번들에
@@ -9,8 +10,8 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: { bodySizeLimit: "4mb" },
   },
-  // 전역 보안 헤더: 클릭재킹·MIME 스니핑 방지, Referrer 최소화, HTTPS 강제.
-  // 관리자 쿠키·페이지 동작에는 영향이 없다(헤더는 쿠키를 건드리지 않음).
+  // 전역 정적 보안 헤더: 클릭재킹·MIME 스니핑 방지, Referrer 최소화, HTTPS 강제.
+  // CSP 는 요청별 nonce 가 필요해 여기 두지 않고 middleware.ts 에서 발급한다.
   async headers() {
     return [
       {
@@ -23,10 +24,15 @@ const nextConfig: NextConfig = {
             key: "Strict-Transport-Security",
             value: "max-age=63072000; includeSubDomains; preload",
           },
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=()",
+          },
         ],
       },
     ];
   },
 };
 
-export default nextConfig;
+// BotID 클라이언트 보호 스크립트 주입 + 서버 검증 경로를 위해 설정을 래핑한다.
+export default withBotId(nextConfig);
