@@ -432,15 +432,15 @@ export default function Home() {
               </defs>
               <rect
                 x="28"
-                y="92"
+                y="102"
                 width="344"
-                height="200"
+                height="180"
                 rx="66"
                 fill="#ffffff"
                 stroke="url(#pimsAppSky)"
                 strokeWidth="15"
               />
-              <path d="M118 272 L82 360 Q76 372 90 364 L166 314 Z" fill="url(#pimsAppTail)" />
+              <path d="M115 269 L82 350 Q76 362 90 354 L159 308 Q166 304 160 299 L124 267 Q118 262 115 269 Z" fill="url(#pimsAppTail)" />
               <text
                 x="200"
                 y="224"
