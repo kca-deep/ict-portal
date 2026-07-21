@@ -35,9 +35,16 @@ set -a; source .env.migration; set +a
 [ -n "${OLD_DB_URL:-}" ] || { echo "❌ OLD_DB_URL 미설정"; exit 1; }
 [ -n "${NEW_DB_URL:-}" ] || { echo "❌ NEW_DB_URL 미설정 — 신규 프로젝트 생성 후 채우세요"; exit 1; }
 
-TABLES=(regulation query_log documents)
-
 q() { psql "$1" -X -A -t -c "$2"; }  # 단일 값 질의
+
+# 이동 후보 중 구(OLD)측에 실존하는 테이블만 대상으로 확정한다.
+# (실측: 구 프로젝트에 documents 가 없음 — 챗 런타임 미사용 레거시라 없으면 건너뜀)
+CANDIDATES=(regulation query_log documents)
+TABLES=()
+for t in "${CANDIDATES[@]}"; do
+  ex=$(q "$OLD_DB_URL" "select count(*) from information_schema.tables where table_schema='public' and table_name='$t'")
+  if [ "$ex" = "1" ]; then TABLES+=("$t"); else echo "ℹ️  구측에 public.$t 없음 — 이동 대상에서 제외"; fi
+done
 
 counts() { # $1=DB_URL $2=라벨
   echo "  [$2]"
@@ -83,9 +90,10 @@ copy() {
       exit 1
     fi
   fi
-  echo "── 데이터 복사(임베딩 포함) ──"
-  pg_dump "$OLD_DB_URL" --data-only --no-owner --no-privileges \
-    --table=public.regulation --table=public.query_log --table=public.documents \
+  echo "── 데이터 복사(임베딩 포함): ${TABLES[*]} ──"
+  local dump_args=()
+  for t in "${TABLES[@]}"; do dump_args+=("--table=public.$t"); done
+  pg_dump "$OLD_DB_URL" --data-only --no-owner --no-privileges "${dump_args[@]}" \
     | psql "$NEW_DB_URL" -X -q --single-transaction -v ON_ERROR_STOP=1
   echo "  복사 완료"
 }
@@ -102,8 +110,9 @@ verify() {
       printf "  %-12s 구 %s ≠ 신 %s ❌\n" "$t" "$o" "$n"; fail=1
     fi
   done
-  # 임베딩 무결성: 비-null 임베딩 수 + 차원(1024) 대조
-  for t in regulation documents; do
+  # 임베딩 무결성: 비-null 임베딩 수 + 차원(1024) 대조 (이동 대상에 포함된 것만)
+  for t in "${TABLES[@]}"; do
+    [ "$t" = "query_log" ] && continue
     oe=$(q "$OLD_DB_URL" "select count(*) from public.$t where embedding is not null")
     ne=$(q "$NEW_DB_URL" "select count(*) from public.$t where embedding is not null")
     nd=$(q "$NEW_DB_URL" "select coalesce(max(vector_dims(embedding)),0) from public.$t")
@@ -113,8 +122,9 @@ verify() {
       printf "  %-12s 임베딩 구 %s/신 %s·%sd ❌\n" "$t" "$oe" "$ne" "$nd"; fail=1
     fi
   done
-  # 검색 RPC 동작 스모크(더미 벡터로 호출 자체가 성공하는지)
-  rpc=$(q "$NEW_DB_URL" "select count(*) from public.regulation_search(repeat('0.001,',1023)||'0.001', '기금', 3)" 2>/dev/null || echo "ERR")
+  # 검색 RPC 동작 스모크(더미 벡터로 호출 자체가 성공하는지).
+  # 시그니처: regulation_search(query_text text, query_embedding vector, match_count int, ...)
+  rpc=$(q "$NEW_DB_URL" "select count(*) from public.regulation_search('기금', ('['||repeat('0.001,',1023)||'0.001]')::extensions.vector(1024), 3)" 2>/dev/null || echo "ERR")
   if [ "$rpc" = "ERR" ]; then echo "  regulation_search RPC ❌"; fail=1; else echo "  regulation_search RPC 호출 OK(${rpc}건) ✅"; fi
   echo "───────────────────────────────────────────"
   if [ "$fail" = "0" ]; then

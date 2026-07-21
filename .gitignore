@@ -56,3 +56,4 @@ __pycache__/
 
 # Generated parsing artifacts (rendered PNGs are derivable from source PDFs on demand)
 data/manuals/_tmp_png/
+.env*
