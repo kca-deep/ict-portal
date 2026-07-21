@@ -38,6 +38,8 @@ pnpm db:reset     # DB 초기화
 
 테스트 셋업 없음 (PoC 단계). 동작 검증은 `pnpm build` + 로컬 `pnpm dev`로 직접 호출.
 
+**배포 전 프로덕션 모드 스모크 필수**: `pnpm build && pnpm start`로 띄워 브라우저에서 챗 전송 1회 + 관리자 로그인 1회 확인. `NODE_ENV` 분기 코드(CSP·보안 헤더·IP 게이트 등)는 `pnpm dev`에서 실행되지 않아 dev 검증만으로는 프로덕션 전용 장애를 못 잡는다(실사례: nonce CSP가 프로덕션에서만 전 페이지 하이드레이션을 차단 — 2026-07, docs/07 §체크리스트 참조).
+
 환경변수는 `.env.local`(로컬) / Vercel(원격). `lib/env.ts`에서 zod로 검증되며, 프로덕션은 핵심 키 누락 시 부팅 실패(superRefine). 필요 키: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`(임베딩), `COHERE_API_KEY`(재정렬), `ANTHROPIC_API_KEY`(LLM), `LAW_GO_KR_API_KEY`(법제처), `ADMIN_USERNAME`·`ADMIN_PASSWORD`(관리자 로그인, 프로덕션 필수), `UPSTASH_REDIS_REST_URL`·`UPSTASH_REDIS_REST_TOKEN`(레이트리밋·비용가드 저장소, 프로덕션 필수). 선택: `ADMIN_SESSION_SECRET`(세션 서명키 분리), `RESEND_API_KEY`·`ALERT_EMAIL_FROM`·`ALERT_EMAIL_TO`(비용 경고 이메일), `INGEST_SECRET`(색인 API 잠금). 임베딩 모델: `EMBEDDING_MODEL=text-embedding-3-small`, `EMBEDDING_DIMENSIONS=1024`.
 
 ## 아키텍처 핵심
