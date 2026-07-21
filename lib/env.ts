@@ -65,6 +65,21 @@ const envSchema = z.object({
   // 상용에선 비번과 분리해 설정(비번을 바꿔도 세션 유지, 키 유출 대응 분리).
   ADMIN_SESSION_SECRET: z.string().optional(),
 
+  // 관리자 표면 하드닝(미들웨어에서 소비 — process.env 직접 참조, 여기선 문서화·검증용).
+  // ADMIN_ALLOWED_IPS: 쉼표 구분 IPv4/CIDR 허용목록. 프로덕션에서 미설정이면 관리자
+  //   표면(/admin·/api/admin) 전체가 404(기본 거부). 기관 고정 IP(SSLVPN egress) 전제.
+  // ADMIN_PATH_SECRET: 관리자 화면 시크릿 슬러그(URL-safe 문자만). 설정 시 /{slug}/* 로만
+  //   접근 가능하고 /admin 직접 접근은 404 은닉. 미설정이면 기존 /admin 유지.
+  ADMIN_ALLOWED_IPS: z.string().optional(),
+  // 교차 출처 허용 목록(쉼표 구분, 미들웨어 소비). 미설정 = 순수 동일 출처(현행 그대로).
+  // Vercel 기본 도메인 사용 시 예: https://<프로젝트>.vercel.app
+  ALLOWED_ORIGINS: z.string().optional(),
+  // 가장자리 슬래시는 미들웨어·페이지가 정규화하므로 허용(설정 실수 방어), 본체는 URL-safe 만.
+  ADMIN_PATH_SECRET: z
+    .string()
+    .regex(/^\/?[A-Za-z0-9_-]+\/?$/, "ADMIN_PATH_SECRET 은 URL-safe 문자(영숫자·-·_)만 허용")
+    .optional(),
+
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
   EMBEDDING_DIMENSIONS: z.coerce.number().default(1024),
   RERANK_MODEL: z.string().default("rerank-v3.5"),
@@ -109,5 +124,13 @@ const envSchema = z.object({
   }
 });
 
-export const env = envSchema.parse(process.env);
+// .env 관례상 `KEY=`(빈 문자열)는 "미설정"을 뜻한다. zod `.optional()` 은 undefined
+// 만 건너뛰고 빈 문자열은 존재값으로 취급하므로, 빈 URL·빈 coerce 숫자 하나가 스키마
+// 전체 parse 를 던지고(→ env 를 import 하는 모든 라우트가 500) 만다. parse 전에 빈
+// 문자열을 undefined 로 정규화해 이 부류의 부팅 사고를 차단한다(default·optional 정상 동작).
+const normalizedEnv = Object.fromEntries(
+  Object.entries(process.env).map(([k, v]) => [k, v === "" ? undefined : v]),
+);
+
+export const env = envSchema.parse(normalizedEnv);
 export type Env = z.infer<typeof envSchema>;

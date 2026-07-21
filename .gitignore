@@ -17,6 +17,8 @@ dist/
 # Environment
 .env
 .env.local
+# Supabase 계정 이전용 접속 정보(구/신 DB URL) — 절대 커밋 금지
+.env.migration
 .env.development.local
 .env.test.local
 .env.production.local

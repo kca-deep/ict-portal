@@ -29,7 +29,10 @@ export default function AdminLoginPage() {
         body: JSON.stringify({ username, password }),
       });
       if (res.ok) {
-        router.replace("/admin");
+        // 슬러그 모드에서는 브라우저 경로가 /{slug}/login 이므로, 현재 경로에서
+        // /login 만 떼어 대시보드 베이스(/{slug} 또는 /admin)로 이동한다.
+        const base = window.location.pathname.replace(/\/login\/?$/, "") || "/admin";
+        router.replace(base);
         router.refresh();
       } else {
         setError(true);

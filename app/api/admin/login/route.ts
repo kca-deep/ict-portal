@@ -55,7 +55,8 @@ export async function POST(req: NextRequest) {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: Math.floor(ADMIN_SESSION_TTL_MS / 1000),
+    // maxAge/expires 를 넣지 않는다 → 브라우저 세션 쿠키. 브라우저를 닫으면 즉시
+    // 로그아웃되고, 계속 켜둔 경우에도 토큰 내장 만료(TTL 8h)가 절대 상한으로 작동한다.
   });
   return res;
 }

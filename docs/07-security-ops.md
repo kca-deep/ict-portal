@@ -97,7 +97,7 @@
 | 키 관리 | Vercel 환경변수. 클라이언트 노출 0. 관리자 세션은 서명 httpOnly 쿠키 |
 | 접근 통제(no-login) | 사용자 인증 없음. 대신 BotID + 레이트리밋 + 비용가드로 남용·비용 통제. 관리자만 비번+쿠키 |
 | 채팅·색인 보호 | 채팅: 봇차단+레이트리밋+비용가드+입력캡. 색인: `INGEST_SECRET` 잠금(외부 404 은닉) |
-| 전송 보안 헤더 | HSTS·X-Frame-Options:DENY·nosniff·Referrer-Policy·Permissions-Policy + **nonce 기반 CSP** |
+| 전송 보안 헤더 | HSTS·X-Frame-Options:DENY·nosniff·Referrer-Policy·Permissions-Policy + **정적 호환 CSP**(script-src 'self'+'unsafe-inline') |
 | 감사 로그 | `query_log`(IP 기준), `crawl_runs` 적재 (관리자 화면 조회) |
 | 백업·복구 | Supabase 자동 백업 (Pro: 7일 PITR) |
 
@@ -117,9 +117,11 @@
 ### 4.2 관리자 인증 (`/admin`)
 
 - **자격증명**: `ADMIN_USERNAME` + `ADMIN_PASSWORD`. 로그인 시 아이디·비밀번호를 각각 **상수시간 비교**(`timingSafeEqual`) 후 AND. 어느 필드가 틀렸는지·계정 존재를 드러내지 않는 동일 `401`.
-- **세션 쿠키**: 맞으면 `${exp}.${HMAC-SHA256}` 서명 토큰을 발급(`lib/admin-auth.ts`). 쿠키는 **httpOnly + sameSite=lax + Secure(프로덕션) + `__Host-` 프리픽스(프로덕션)**. 서명키는 `ADMIN_SESSION_SECRET`(없으면 `ADMIN_PASSWORD` 폴백). 만료 8시간.
+- **세션 쿠키**: 맞으면 `${exp}.${HMAC-SHA256}` 서명 토큰을 발급(`lib/admin-auth.ts`). 쿠키는 **httpOnly + sameSite=lax + Secure(프로덕션) + `__Host-` 프리픽스(프로덕션)**. 서명키는 `ADMIN_SESSION_SECRET`(없으면 `ADMIN_PASSWORD` 폴백). **브라우저 세션 쿠키(2026-07)** — maxAge 없음: 브라우저 종료 시 즉시 로그아웃, 켜둔 경우 토큰 내장 만료 8시간이 절대 상한. `/api/admin/logout`(로그아웃 버튼)으로 능동 종료 가능.
 - **문지기(미들웨어)**: `/admin/*`(로그인 폼 제외) 진입 시 쿠키 서명·만료 검증. 실패 시 로그인으로 리다이렉트. `/api/admin/*` 라우트는 핸들러에서 동일 쿠키를 직접 검증.
 - **브루트포스 억제**: 로그인 시도 IP당 10분 10회(Upstash). 초과 시 429.
+- **IP 허용목록(2026-07)**: `ADMIN_ALLOWED_IPS`(쉼표 구분 IPv4 단일/CIDR, `lib/admin-ip.ts`). 관리자 표면(화면+`/api/admin/*`) 진입 시 `x-forwarded-for` **첫 값**(Vercel 엣지가 관측한 실제 소스 IP — 위조 값은 플랫폼이 제거) 검사. 불일치·미설정 시 **404 rewrite(존재 은닉, 프로덕션 기본 거부)**. 기관 고정 IP(SSLVPN egress) 전제. 로컬 개발은 검사 생략. ⚠️ Vercel 앞에 다른 프록시를 얹으면 첫 값 신뢰 가정 재검토.
+- **시크릿 슬러그(2026-07)**: `ADMIN_PATH_SECRET` 설정 시 관리자 화면은 `/{slug}/*` 로만 접근(미들웨어가 내부 `/admin/*` 로 rewrite). `/admin` 직접 접근은 404 은닉. 내부 링크는 슬러그 기준으로 생성(`page.tsx ADMIN_BASE`). API 는 고정 경로(`/api/admin/*`) 유지 — IP 허용목록이 커버. 미설정 시 기존 `/admin` 유지(env 만으로 켜고 끔). 게이트 순서: **IP → 쿠키 → rewrite**.
 
 ### 4.3 채팅 엔드포인트 가드 (`/api/chat`) — 진입 순서
 
@@ -254,7 +256,7 @@
 
 ### High (오픈 전 권장) — 현황
 
-- [x] **보안 헤더**: HSTS·X-Frame-Options·nosniff·Referrer-Policy·Permissions-Policy + **nonce 기반 CSP**(미들웨어).
+- [x] **보안 헤더**: HSTS·X-Frame-Options·nosniff·Referrer-Policy·Permissions-Policy + **정적 호환 CSP**(미들웨어). ⚠️ 초기의 nonce+'strict-dynamic' CSP 는 프로덕션 전면 장애 원인이어서 폐기(2026-07-21) — Turbopack 프로덕션 빌드가 미들웨어 nonce 를 문서 스크립트에 부착하지 않아(정적·동적 페이지 공통 실측) strict-dynamic 이 _next/static 청크까지 전부 차단, 전 페이지 하이드레이션 실패. 현행: script-src 'self' 'unsafe-inline'(외부 출처 스크립트는 계속 차단).
 - [x] **비용 경고**: 예산 임계치 도달 시 관리자 이메일(Resend).
 - [ ] **타임아웃·재시도**: 모든 외부 호출에 일관 적용(부분 적용 — 점검 필요).
 - [ ] **Vercel WAF 룰**: 대시보드에서 레이트 룰·Attack Mode 설정(코드 밖 작업).
