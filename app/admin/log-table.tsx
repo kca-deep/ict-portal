@@ -4,14 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { QueryLogListItem } from "@/lib/db/query-log";
 
-// query_log 표(클라이언트). 초기 한 페이지(기본 20건)는 서버가 렌더해 넘기고, 페이지 이동·
+// query_log 표(클라이언트). 초기 한 페이지(기본 10건)는 서버가 렌더해 넘기고, 페이지 이동·
 // 페이지 크기 변경 시 /api/admin/logs 에서 해당 구간을 offset/limit 로 받아 교체한다.
 // service_role 은 서버에만 있으므로 넘어오는 건 요약 행뿐. total(필터 내 총건수)로 페이지 수 산출.
 
-const PAGE_SIZES = [20, 50, 100, 200, 300] as const;
-const DEFAULT_SIZE = 20;
+const PAGE_SIZES = [10, 20, 50, 100, 200, 300] as const;
+const DEFAULT_SIZE = 10;
 
 type Sp = {
+  base: string; // 관리자 링크 베이스 — "/admin" 또는 슬러그 모드의 "/{slug}"
   period?: string;
   route?: string;
   halluc?: string;
@@ -93,7 +94,7 @@ function href(sp: Sp, patch: Record<string, string | undefined>) {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(merged)) if (v) p.set(k, v);
   const qs = p.toString();
-  return qs ? `/admin?${qs}` : "/admin";
+  return qs ? `${sp.base}?${qs}` : sp.base;
 }
 function RoutePill({ route }: { route: "unified" | "regulation" | "law" | "out_of_scope" }) {
   const m = ROUTE_META[route];
@@ -125,18 +126,20 @@ function SortTh({
   col,
   label,
   align,
+  w,
 }: {
   sp: Sp;
   col: "created_at" | "top_score" | "total_ms" | "tokens";
   label: string;
   align: "left" | "right";
+  w?: string; // table-fixed 칼럼 폭 클래스
 }) {
   const active = sp.sort === col || (!sp.sort && col === "created_at");
   const dir = active ? (sp.dir === "asc" ? "asc" : "desc") : "desc";
   const nextDir = active && dir === "desc" ? "asc" : "desc";
   const arrow = active ? (dir === "desc" ? " ↓" : " ↑") : "";
   return (
-    <th className={`px-4 py-2.5 font-medium ${align === "right" ? "text-right" : "text-left"}`}>
+    <th className={`px-4 py-2.5 font-medium ${align === "right" ? "text-right" : "text-left"} ${w ?? ""}`}>
       <Link
         href={href(sp, { sort: col, dir: nextDir, log: undefined })}
         className={`transition hover:text-foreground ${active ? "text-foreground" : ""}`}
@@ -238,19 +241,21 @@ export function LogTable({
 
   return (
     <>
+      {/* table-fixed + 명시 칼럼 폭: 고정 칼럼을 뺀 남는 폭을 질문이 전부 받아 말줄임(…)
+          처리되므로 카드에 가로 스크롤이 생기지 않는다(overflow-x-auto 는 초소형 화면 안전핀). */}
       <section className="mt-6 overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
-        <table className="w-full min-w-[940px] border-collapse text-[13px]">
+        <table className="w-full table-fixed border-collapse text-[13px]">
           <thead>
             <tr className="border-b border-border bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
-              <SortTh sp={sp} col="created_at" label="시각" align="left" />
-              <th className="px-4 py-2.5 text-left font-medium">IP</th>
+              <SortTh sp={sp} col="created_at" label="시각" align="left" w="w-[128px]" />
+              <th className="w-[118px] px-4 py-2.5 text-left font-medium">IP</th>
               <th className="px-4 py-2.5 text-left font-medium">질문</th>
-              <th className="px-4 py-2.5 text-left font-medium">분기</th>
-              <th className="px-4 py-2.5 text-center font-medium">시간대</th>
-              <th className="px-4 py-2.5 text-center font-medium">환각</th>
-              <th className="px-4 py-2.5 text-center font-medium">피드백</th>
-              <SortTh sp={sp} col="total_ms" label="응답" align="right" />
-              <SortTh sp={sp} col="tokens" label="토큰" align="right" />
+              <th className="w-[72px] px-4 py-2.5 text-left font-medium">분기</th>
+              <th className="w-[68px] px-4 py-2.5 text-center font-medium">시간대</th>
+              <th className="w-[60px] px-4 py-2.5 text-center font-medium">환각</th>
+              <th className="w-[72px] px-4 py-2.5 text-center font-medium">피드백</th>
+              <SortTh sp={sp} col="total_ms" label="응답" align="right" w="w-[76px]" />
+              <SortTh sp={sp} col="tokens" label="토큰" align="right" w="w-[84px]" />
             </tr>
           </thead>
           <tbody>
@@ -273,7 +278,7 @@ export function LogTable({
                   <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs tabular-nums text-muted-foreground">
                     {fmtTime(r.created_at)}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-muted-foreground">
+                  <td className="truncate whitespace-nowrap px-4 py-2.5 font-mono text-xs text-muted-foreground">
                     {r.ip ? (
                       <Link href={href(sp, { ip: r.ip, log: undefined })} className="hover:text-primary hover:underline">
                         {r.ip}
@@ -282,7 +287,7 @@ export function LogTable({
                       "–"
                     )}
                   </td>
-                  <td className="max-w-md px-4 py-2.5">
+                  <td className="px-4 py-2.5">
                     <Link
                       href={href(sp, { log: String(r.id) })}
                       className="block truncate text-foreground hover:text-primary hover:underline"
@@ -310,9 +315,9 @@ export function LogTable({
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5 text-center">
                     {r.feedback === 1 ? (
-                      <span title="도움됨">👍</span>
+                      <span className="text-xs font-semibold text-primary">도움</span>
                     ) : r.feedback === -1 ? (
-                      <span title="아쉬움">👎</span>
+                      <span className="text-xs font-semibold text-destructive">아쉬움</span>
                     ) : (
                       <span className="text-muted-foreground/30">·</span>
                     )}
@@ -330,7 +335,7 @@ export function LogTable({
         </table>
       </section>
 
-      {/* 페이지네이션 — 좌: 페이지당 건수(20~300), 우: 범위·이전/다음. 필터 내 총건수(total)로
+      {/* 페이지네이션 — 좌: 페이지당 건수(10~300), 우: 범위·이전/다음. 필터 내 총건수(total)로
           페이지 수를 산출한다. */}
       <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-1">
         <div className="flex items-center gap-1">

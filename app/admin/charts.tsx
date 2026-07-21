@@ -9,7 +9,6 @@ import {
   Label,
   Pie,
   PieChart,
-  ReferenceDot,
   Sector,
   XAxis,
 } from "recharts";
@@ -28,26 +27,12 @@ const usageConfig = {
   count: { label: "질의 수", color: "var(--primary)" },
 } satisfies ChartConfig;
 
-// 사용량 추이 — 그라디언트 area(2026 트렌드). natural 곡선 + 상단 진하게→하단 투명,
-// 마지막 지점 글로우 마커로 '현재'를 강조. 그리드는 가로 점선만(미니멀).
+// 사용량 추이 — 경량 area: monotone 보간(버킷 값 왜곡 없음) + 단색 연한 면.
+// 그라디언트·글로우 장식 없이 그리드는 가로 점선만(미니멀). hover 는 tooltip + activeDot.
 export function UsageChart({ data }: { data: { label: string; count: number }[] }) {
-  const last = data.length - 1;
   return (
-    <ChartContainer config={usageConfig} className="mt-5 h-32 w-full">
+    <ChartContainer config={usageConfig} className="h-[148px] w-full">
       <AreaChart accessibilityLayer data={data} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
-        <defs>
-          <linearGradient id="usageGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-count)" stopOpacity={0.28} />
-            <stop offset="100%" stopColor="var(--color-count)" stopOpacity={0.02} />
-          </linearGradient>
-          <filter id="usageGlow" x="-60%" y="-60%" width="220%" height="220%">
-            <feGaussianBlur stdDeviation="2.5" result="b" />
-            <feMerge>
-              <feMergeNode in="b" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
         <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} minTickGap={28} />
         <ChartTooltip
@@ -56,25 +41,14 @@ export function UsageChart({ data }: { data: { label: string; count: number }[] 
         />
         <Area
           dataKey="count"
-          type="natural"
+          type="monotone"
           stroke="var(--color-count)"
           strokeWidth={2}
-          fill="url(#usageGrad)"
+          fill="var(--color-count)"
+          fillOpacity={0.08}
           dot={false}
           activeDot={{ r: 4, strokeWidth: 0, fill: "var(--color-count)" }}
         />
-        {last >= 0 && (
-          <ReferenceDot
-            x={data[last].label}
-            y={data[last].count}
-            r={3.5}
-            fill="var(--color-count)"
-            stroke="var(--background)"
-            strokeWidth={2}
-            filter="url(#usageGlow)"
-            isFront
-          />
-        )}
       </AreaChart>
     </ChartContainer>
   );
@@ -105,15 +79,15 @@ export function RouteDonut({
   const slices = data.filter((d) => d.count > 0);
   const [active, setActive] = useState<number | undefined>(undefined);
   return (
-    <ChartContainer config={routeConfig} className="mx-auto aspect-square h-[150px]">
+    <ChartContainer config={routeConfig} className="mx-auto aspect-square h-[120px]">
       <PieChart>
         <ChartTooltip content={<ChartTooltipContent nameKey="route" hideLabel />} />
         <Pie
           data={slices}
           dataKey="count"
           nameKey="route"
-          innerRadius={50}
-          outerRadius={70}
+          innerRadius={38}
+          outerRadius={52}
           paddingAngle={2}
           strokeWidth={0}
           activeIndex={active ?? -1}
@@ -130,10 +104,10 @@ export function RouteDonut({
               const { cx, cy } = viewBox as { cx: number; cy: number };
               return (
                 <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle">
-                  <tspan x={cx} y={cy - 3} className="fill-foreground font-serif" style={{ fontSize: 22 }}>
+                  <tspan x={cx} y={cy - 2} className="fill-foreground font-serif" style={{ fontSize: 18 }}>
                     {total.toLocaleString()}
                   </tspan>
-                  <tspan x={cx} y={cy + 15} className="fill-muted-foreground" style={{ fontSize: 10 }}>
+                  <tspan x={cx} y={cy + 13} className="fill-muted-foreground" style={{ fontSize: 9 }}>
                     질의
                   </tspan>
                 </text>

@@ -35,6 +35,9 @@ export type QueryLogRow = {
   tokens_in?: number | null;
   tokens_out?: number | null;
   error_code?: string | null;
+  // jsonb — 요청당 외부 API 사용량 집계(lib/usage/ledger ApiUsage 형태).
+  // ※ 마이그레이션 20260716000001 적용 후에만 컬럼 존재 — 미적용 DB 에 배포하면 insert 가 실패한다.
+  api_usage?: unknown;
 };
 
 /**
@@ -157,6 +160,7 @@ export type QueryLogDetail = QueryLogListItem & {
   error_code: string | null;
   feedback: number | null;
   feedback_note: string | null;
+  api_usage: unknown; // jsonb — 요청당 외부 API 사용량(임베딩·재정렬·보조 LLM·법제처)
 };
 
 const LIST_COLUMNS =
@@ -214,22 +218,40 @@ export type QueryLogStats = {
   avgTotalMs: number | null;
   avgTtftMs: number | null;
   series: { label: string; count: number }[]; // 사용량 추이(시간/일 버킷)
+  heatmap: number[][]; // KST 요일(7, 0=일)×시간(24) 질의 수 — 시간대 사용 패턴 히트맵용
+  // 안전핀(최대 10만 행) 도달로 집계가 잘렸는지 여부. true 면 UI 에 배지 표시.
+  truncated: boolean;
+  // 외부 API 사용량 합계(필터 범위 내). answer* 는 tokens_in/out 합, 나머지는
+  // api_usage jsonb 합산(계측 도입 전 행은 null → 0 취급).
+  api: ApiUsageStats;
 };
 
-// created_at 목록을 사용량 추이 버킷으로 접는다. 조회 창 기준으로 24h 이내면 시간별,
-// 그 이상이면 일별(최근 30일 상한). 서버에서 그대로 SVG 차트로 렌더한다.
+export type ApiUsageStats = {
+  answerIn: number; // 답변 LLM 입력 토큰 합
+  answerOut: number; // 답변 LLM 출력 토큰 합
+  auxCalls: number; // 보조 LLM(의도 분해·범위 게이트) 호출 수
+  auxIn: number;
+  auxOut: number;
+  embedCalls: number; // OpenAI 임베딩 호출 수
+  embedTokens: number;
+  cohereCalls: number; // Cohere 재정렬 호출 수
+  cohereUnits: number; // Cohere 과금 단위(search units)
+  lawCalls: number; // 법제처 DRF 호출 수
+};
+
+// created_at 목록을 사용량 추이 버킷으로 접는다. 조회 창 기준으로 2일 이내면 시간별,
+// 90일 이내면 일별, 그 이상이면 주별. 서버에서 그대로 SVG 차트로 렌더한다.
 function buildUsageSeries(
   times: number[],
   since: string | undefined,
 ): { label: string; count: number }[] {
   const now = Date.now();
-  let start = since ? new Date(since).getTime() : times.length ? Math.min(...times) : now - 24 * 3600 * 1000;
-  const hourly = now - start <= 2 * 24 * 3600 * 1000;
-  const bucketMs = hourly ? 3600 * 1000 : 24 * 3600 * 1000;
-  if (!hourly) {
-    const maxSpan = 30 * 24 * 3600 * 1000; // 일별 버킷 개수 상한
-    if (now - start > maxSpan) start = now - maxSpan;
-  }
+  const start = since ? new Date(since).getTime() : times.length ? Math.min(...times) : now - 24 * 3600 * 1000;
+  // 조회 창 크기에 따라 버킷 선택: ≤2일 시간별 · ≤90일 일별 · 그 이상 주별(1년 ≈ 52포인트).
+  const DAY_MS = 24 * 3600 * 1000;
+  const span = now - start;
+  const hourly = span <= 2 * DAY_MS;
+  const bucketMs = hourly ? 3600 * 1000 : span <= 90 * DAY_MS ? DAY_MS : 7 * DAY_MS;
   const startAligned = Math.floor(start / bucketMs) * bucketMs;
   const buckets: { t: number; count: number }[] = [];
   for (let t = startAligned; t <= now; t += bucketMs) buckets.push({ t, count: 0 });
@@ -247,8 +269,10 @@ function buildUsageSeries(
   });
 }
 
-// 집계 대상 상한 — PoC 규모(소량)라 행을 가져와 JS 에서 집계한다. 창이 커지면 RPC 로 승격.
-const STATS_ROW_CAP = 5000;
+// 집계는 조회 창(≤1년) 내 전 행 대상 — 1,000행 청크로 나눠 가져와 JS 에서 접는다.
+// PoC 규모라 RPC 승격 없이 충분. MAX 도달 시 truncated 로 UI 에 알린다(무표시 잘림 금지).
+const STATS_CHUNK = 1000;
+const STATS_MAX_CHUNKS = 100; // 안전핀: 100 × 1,000 = 10만 행
 
 // created_at(UTC 저장)을 KST(UTC+9) 벽시계로 환산해 요일·시각·날짜키·연도를 얻는다.
 // Vercel 서버는 UTC 라 getHours()/getDay() 를 그대로 쓰면 9시간 어긋나므로, 타임스탬프에
@@ -272,19 +296,7 @@ function kstInfo(iso: string): { day: number; hour: number; dateKey: string; yea
 export async function queryLogStats(
   filter: QueryLogFilter = {},
 ): Promise<QueryLogStats> {
-  let q = getSupabaseAdmin()
-    .from("query_log")
-    .select(
-      "ip, created_at, route, has_hallucination, total_ms, ttft_ms, citation_count, citation_verified_count, error_code, feedback",
-    )
-    .order("created_at", { ascending: false })
-    .limit(STATS_ROW_CAP);
-  q = applyFilter(q, filter);
-
-  const { data, error } = await q;
-  if (error) throw new Error(`[query-log] stats failed: ${error.message}`);
-
-  const rows = (data ?? []) as unknown as Array<{
+  type StatsRow = {
     ip: string | null;
     created_at: string;
     route: string | null;
@@ -295,7 +307,32 @@ export async function queryLogStats(
     citation_verified_count: number | null;
     error_code: string | null;
     feedback: number | null;
-  }>;
+    tokens_in: number | null;
+    tokens_out: number | null;
+    api_usage: Record<string, number> | null;
+  };
+
+  const rows: StatsRow[] = [];
+  let truncated = false;
+  for (let chunk = 0; chunk < STATS_MAX_CHUNKS; chunk++) {
+    let q = getSupabaseAdmin()
+      .from("query_log")
+      .select(
+        "ip, created_at, route, has_hallucination, total_ms, ttft_ms, citation_count, citation_verified_count, error_code, feedback, tokens_in, tokens_out, api_usage",
+      )
+      // created_at 동률 행에서 페이지 경계가 흔들리지 않도록 id 를 2차 정렬키로 고정.
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(chunk * STATS_CHUNK, (chunk + 1) * STATS_CHUNK - 1);
+    q = applyFilter(q, filter);
+
+    const { data, error } = await q;
+    if (error) throw new Error(`[query-log] stats failed: ${error.message}`);
+    const page = (data ?? []) as unknown as StatsRow[];
+    rows.push(...page);
+    if (page.length < STATS_CHUNK) break;
+    if (chunk === STATS_MAX_CHUNKS - 1) truncated = true;
+  }
 
   const byRoute = { unified: 0, regulation: 0, law: 0, out_of_scope: 0, unknown: 0 };
   const users = new Set<string>();
@@ -308,10 +345,23 @@ export async function queryLogStats(
   let ratedCount = 0;
   let restDayCount = 0;
   let weeknightCount = 0;
+  const heatmap: number[][] = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
   let totalMsSum = 0;
   let totalMsN = 0;
   let ttftMsSum = 0;
   let ttftMsN = 0;
+  const api: ApiUsageStats = {
+    answerIn: 0,
+    answerOut: 0,
+    auxCalls: 0,
+    auxIn: 0,
+    auxOut: 0,
+    embedCalls: 0,
+    embedTokens: 0,
+    cohereCalls: 0,
+    cohereUnits: 0,
+    lawCalls: 0,
+  };
 
   // 쉬는 날 판정용 공휴일 집합 — 데이터에 등장하는 연도만 조회(캐싱·폴백은 lib/holidays).
   const years = new Set<number>();
@@ -324,6 +374,7 @@ export async function queryLogStats(
     // 쉬는 날(주말+공휴일)과 평일 저녁·심야를 상호배타로 카운트한다. 쉬는 날은 하루 전체를
     // 쉬는 날 버킷이 가져가므로, 평일 저녁·심야는 쉬는 날이 아닐 때만 잡힌다(교집합 없음).
     const { day, hour, dateKey, year } = kstInfo(r.created_at);
+    heatmap[day][hour] += 1;
     const isRestDay =
       day === 0 || day === 6 || (holidayByYear.get(year)?.has(dateKey) ?? false);
     if (isRestDay) {
@@ -354,6 +405,20 @@ export async function queryLogStats(
       ttftMsSum += r.ttft_ms;
       ttftMsN += 1;
     }
+    // 외부 API 사용량 합산 — 계측 도입 전 행은 api_usage 가 null(0 취급).
+    api.answerIn += r.tokens_in ?? 0;
+    api.answerOut += r.tokens_out ?? 0;
+    const u = r.api_usage;
+    if (u) {
+      api.auxCalls += u.anthropic_aux_calls ?? 0;
+      api.auxIn += u.anthropic_aux_in ?? 0;
+      api.auxOut += u.anthropic_aux_out ?? 0;
+      api.embedCalls += u.openai_embed_calls ?? 0;
+      api.embedTokens += u.openai_embed_tokens ?? 0;
+      api.cohereCalls += u.cohere_calls ?? 0;
+      api.cohereUnits += u.cohere_search_units ?? 0;
+      api.lawCalls += u.law_api_calls ?? 0;
+    }
   }
 
   const total = rows.length;
@@ -375,5 +440,8 @@ export async function queryLogStats(
     avgTotalMs: totalMsN ? Math.round(totalMsSum / totalMsN) : null,
     avgTtftMs: ttftMsN ? Math.round(ttftMsSum / ttftMsN) : null,
     series: buildUsageSeries(times, filter.since),
+    heatmap,
+    truncated,
+    api,
   };
 }

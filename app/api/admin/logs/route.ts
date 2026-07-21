@@ -8,7 +8,7 @@ import { listQueryLogs, type QueryLogFilter, type SortKey } from "@/lib/db/query
 export const runtime = "nodejs";
 
 // 페이지 크기 화이트리스트 — 임의 값으로 대량 조회하는 것을 막는다(표 UI 선택지와 일치).
-const ALLOWED_LIMITS = [20, 50, 100, 200, 300];
+const ALLOWED_LIMITS = [10, 20, 50, 100, 200, 300];
 
 export async function GET(req: NextRequest) {
   const secret = adminSessionSecret();
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const offset = Math.max(0, Math.trunc(Number(sp.get("offset")) || 0));
   const limParam = Math.trunc(Number(sp.get("limit")));
-  const limit = ALLOWED_LIMITS.includes(limParam) ? limParam : 20;
+  const limit = ALLOWED_LIMITS.includes(limParam) ? limParam : 10;
   const routeParam = sp.get("route");
   const route =
     routeParam === "unified" ||
