@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { env } from "@/lib/env";
+import { addUsage } from "@/lib/usage/ledger";
 
 let _openai: OpenAI | null = null;
 function getOpenAI(): OpenAI {
@@ -18,6 +19,11 @@ export async function embed(texts: string[]): Promise<number[][]> {
     model: env.EMBEDDING_MODEL,
     input: texts,
     dimensions: env.EMBEDDING_DIMENSIONS,
+  });
+  // 요청 원장에 사용량 계측(원장이 없는 컨텍스트 — ingest 등 — 에선 no-op).
+  addUsage({
+    openai_embed_calls: 1,
+    openai_embed_tokens: res.usage?.total_tokens ?? 0,
   });
   return res.data.map((d) => d.embedding);
 }

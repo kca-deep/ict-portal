@@ -6,8 +6,12 @@ import "./globals.css";
 import "streamdown/styles.css";
 
 // BotID 로 보호할 서버 경로 — 클라이언트가 이 경로로 보내는 요청에 봇 탐지 신호를
-// 자동 첨부한다(서버는 /api/chat 에서 checkBotId 로 검증). 공개 유료 엔드포인트만.
-const PROTECTED_ROUTES = [{ path: "/api/chat", method: "POST" }];
+// 자동 첨부한다(각 라우트가 checkBotId 로 검증). chat 은 유료 LLM, feedback 은
+// 무인증 쓰기(만족도 KPI 조작 방지).
+const PROTECTED_ROUTES = [
+  { path: "/api/chat", method: "POST" },
+  { path: "/api/feedback", method: "POST" },
+];
 
 // 본문·디스플레이 공통 폰트: IBM Plex Sans KR(빌드 시 자체 호스팅).
 // globals.css 의 --font-sans 가 이 로더 변수를 참조하고, --font-display 는

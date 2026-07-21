@@ -13,6 +13,7 @@
  * (route 가 법령 없이도 내부 규정만으로 계속 진행할 수 있어야 한다.)
  */
 import { env } from "@/lib/env";
+import { addUsage } from "@/lib/usage/ledger";
 
 export const SEARCH_URL =
   env.LAW_GO_KR_BASE_URL ?? "https://www.law.go.kr/DRF/lawSearch.do";
@@ -23,6 +24,8 @@ export const SERVICE_URL = SEARCH_URL.replace("lawSearch.do", "lawService.do");
 export type DrfTarget = "law" | "prec" | "detc" | "expc" | "aiSearch";
 
 export async function getJson(url: string): Promise<any | null> {
+  // 법제처 DRF 호출 횟수 계측(성공·실패 무관 — 왕복 자체가 사용량이다).
+  addUsage({ law_api_calls: 1 });
   try {
     const res = await fetch(url, { headers: { Accept: "application/json" } });
     if (!res.ok) return null;

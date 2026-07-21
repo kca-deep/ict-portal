@@ -1,5 +1,6 @@
 import { CohereClient } from "cohere-ai";
 import { env } from "@/lib/env";
+import { addUsage } from "@/lib/usage/ledger";
 
 const cohere = new CohereClient({ token: env.COHERE_API_KEY });
 
@@ -23,6 +24,11 @@ export async function rerank(
     query,
     documents,
     topN: Math.min(topN, candidates.length),
+  });
+  // Cohere 과금 단위(search unit) 계측 — meta 누락 시 호출 1회 = 1 unit 로 근사.
+  addUsage({
+    cohere_calls: 1,
+    cohere_search_units: response.meta?.billedUnits?.searchUnits ?? 1,
   });
   return response.results.map((r) => ({
     ...candidates[r.index],

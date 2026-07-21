@@ -58,6 +58,33 @@ export async function checkLoginRateLimit(
   }
 }
 
+// 피드백(👍/👎) 남용 억제 — IP당 분당 30회. 무인증 쓰기 엔드포인트라 대량 호출로
+// 만족도 KPI 를 조작하는 것을 막는다. 유료 LLM 을 부르지 않는 경량 쓰기이므로
+// 저장소 오류·미구성 시 fail-open(로그인 리미터와 같은 정책 — 가용성 우선).
+let feedbackLimiter: Ratelimit | null = null;
+export async function checkFeedbackRateLimit(
+  ip: string | undefined,
+): Promise<{ ok: boolean }> {
+  if (!rateLimitEnabled()) return { ok: true };
+  const redis = getRedis();
+  if (!redis) return { ok: true };
+  try {
+    if (!feedbackLimiter) {
+      feedbackLimiter = new Ratelimit({
+        redis,
+        limiter: Ratelimit.slidingWindow(30, "60 s"),
+        prefix: "rl:fb",
+        analytics: false,
+      });
+    }
+    const r = await feedbackLimiter.limit(ip ?? "unknown");
+    return { ok: r.success };
+  } catch (err) {
+    console.error("[ratelimit] feedback check failed:", (err as Error).message);
+    return { ok: true };
+  }
+}
+
 // 일일 카운터 원자 증가 + 첫 증가 시 TTL 부여. 반환은 증가 후 값.
 async function incrDaily(redis: RedisClient, key: string): Promise<number> {
   const n = await redis.incr(key);

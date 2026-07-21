@@ -33,6 +33,7 @@ import { env } from "@/lib/env";
 import { checkRateLimit } from "@/lib/security/ratelimit";
 import { checkCostBudget, recordTokens } from "@/lib/security/cost-guard";
 import { logQuery, type QueryLogRow } from "@/lib/db/query-log";
+import { emptyUsage, runWithUsage } from "@/lib/usage/ledger";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -272,12 +273,17 @@ export async function POST(req: NextRequest) {
         typeof body.session_id === "string" && UUID_RE.test(body.session_id)
           ? body.session_id
           : null;
+      // 요청당 외부 API 사용량 원장 — 아래 runWithUsage 컨텍스트 안의 임베딩·재정렬·
+      // 보조 LLM·법제처 호출이 여기 누적된다(제자리 변이라 참조만 넘겨도 최신값).
+      const apiUsage = emptyUsage();
       const logRow: QueryLogRow = {
         query,
         ip: clientIp ?? null,
         message_count: body.messages.length,
         session_id: sessionId,
+        api_usage: apiUsage,
       };
+      await runWithUsage(apiUsage, async () => {
       try {
         // 1) 통합 검색 — 내부 규정(최대 RETRIEVAL_TOP_K=30) + 법제처 법령 조문(≤50)
         //    + 판례 목록(투기적, 주입분에 법령이 있을 때만 소비) + 의도 분해 게이트를
@@ -561,9 +567,18 @@ export async function POST(req: NextRequest) {
         logRow.tokens_in = usage?.input ?? null;
         logRow.tokens_out = usage?.output ?? null;
 
-        // 비용 가드: 소비 토큰(입력+출력)을 일일 예산에 누적(fire-and-forget). 임계치
-        // 교차 시 관리자 이메일 경고. 응답 스트림을 지연시키지 않도록 await 하지 않는다.
-        void recordTokens(clientIp, (usage?.input ?? 0) + (usage?.output ?? 0));
+        // 비용 가드: 소비 토큰을 일일 예산에 누적(fire-and-forget). 답변 LLM 외에
+        // 보조 LLM(의도 분해·범위 게이트)·임베딩 토큰도 합산한다 — 종전엔 답변분만
+        // 계측돼 실제 지출이 예산보다 컸다. (보조·임베딩은 이 시점에 모두 완료 상태.
+        // Cohere 는 토큰 단위가 아니라 query_log.api_usage 관측으로만 남긴다.)
+        void recordTokens(
+          clientIp,
+          (usage?.input ?? 0) +
+            (usage?.output ?? 0) +
+            apiUsage.anthropic_aux_in +
+            apiUsage.anthropic_aux_out +
+            apiUsage.openai_embed_tokens,
+        );
 
         // 7) 인용 검증 — 답변에 등장한 「법」 제N조가 법제처에 실존하는지 교차 검증
         //    (환각 경고 배지 전용 — 참조 카드 결정과 분리). 시스템 프롬프트가 자료 밖
@@ -640,6 +655,7 @@ export async function POST(req: NextRequest) {
         }
         controller.close();
       }
+      }); // runWithUsage — 요청 원장 컨텍스트 종료
     },
   });
 

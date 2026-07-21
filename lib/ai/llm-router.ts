@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { env } from "@/lib/env";
+import { addUsage } from "@/lib/usage/ledger";
 import {
   CHAT_SYSTEM_PROMPT,
   INTENT_DECOMPOSE_PROMPT,
@@ -47,6 +48,19 @@ function buildUserMessage(ctx: ChatContext): string {
   return `<context>\n${buildContextBlock(ctx)}\n</context>\n\n질문: ${ctx.query}`;
 }
 
+// 보조 LLM(의도 분해·범위 게이트) 토큰을 요청 원장에 계측. 답변 LLM 과 분리해
+// 집계해야 비용가드·대시보드에서 보조 호출 비중이 보인다. 캐시 토큰도 입력 총량에 합산.
+function recordAuxUsage(u: Anthropic.Usage): void {
+  addUsage({
+    anthropic_aux_calls: 1,
+    anthropic_aux_in:
+      u.input_tokens +
+      (u.cache_read_input_tokens ?? 0) +
+      (u.cache_creation_input_tokens ?? 0),
+    anthropic_aux_out: u.output_tokens,
+  });
+}
+
 /**
  * 의도 분해 게이트: 검색 대상이 서로 다른 목적이 2개 이상 담긴 복합 질의를
  * 독립 검색 질의들로 분해한다(최대 3개). 단일 목적이거나 실패하면 빈 배열 —
@@ -68,6 +82,7 @@ export async function decomposeIntents(query: string): Promise<string[]> {
         },
       ],
     });
+    recordAuxUsage(res.usage);
     const text = res.content
       .map((b) => (b.type === "text" ? b.text : ""))
       .join("")
@@ -113,6 +128,7 @@ export async function isInScope(query: string): Promise<boolean> {
         },
       ],
     });
+    recordAuxUsage(res.usage);
     const text = res.content
       .map((b) => (b.type === "text" ? b.text : ""))
       .join("")
