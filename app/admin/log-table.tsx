@@ -4,15 +4,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { QueryLogListItem } from "@/lib/db/query-log";
 
-// query_log 표(클라이언트). 초기 한 페이지(기본 10건)는 서버가 렌더해 넘기고, 페이지 이동·
-// 페이지 크기 변경 시 /api/admin/logs 에서 해당 구간을 offset/limit 로 받아 교체한다.
-// service_role 은 서버에만 있으므로 넘어오는 건 요약 행뿐. total(필터 내 총건수)로 페이지 수 산출.
-
-const PAGE_SIZES = [10, 20, 50, 100, 200, 300] as const;
-const DEFAULT_SIZE = 10;
+// query_log 표(클라이언트). 초기 한 페이지는 서버가 렌더해 넘기고(크기는 ?ps= 콤보 —
+// 필터 행의 PageSizeSelect 가 관리), 페이지 이동 시 /api/admin/logs 에서 해당 구간을
+// offset/limit 로 받아 교체한다. service_role 은 서버에만 있으므로 넘어오는 건 요약 행뿐.
 
 type Sp = {
   base: string; // 관리자 링크 베이스 — "/admin" 또는 슬러그 모드의 "/{slug}"
+  ps?: string; // 페이지당 건수(기본 10이면 생략) — 행 내 링크가 보존해야 함
   period?: string;
   route?: string;
   halluc?: string;
@@ -89,6 +87,7 @@ function href(sp: Sp, patch: Record<string, string | undefined>) {
     to: sp.to,
     sort: sp.sort,
     dir: sp.dir,
+    ps: sp.ps,
     ...patch,
   };
   const p = new URLSearchParams();
@@ -155,6 +154,7 @@ export function LogTable({
   initialRows,
   total,
   holidays,
+  pageSize,
   sp,
   since,
   until,
@@ -163,6 +163,7 @@ export function LogTable({
   initialRows: QueryLogListItem[];
   total: number;
   holidays: string[];
+  pageSize: number; // 페이지당 건수 — 필터 행 콤보(?ps=)가 결정, 변경 시 부모 key 로 remount
   sp: Sp;
   since?: string;
   until?: string;
@@ -170,7 +171,6 @@ export function LogTable({
 }) {
   const [rows, setRows] = useState<QueryLogListItem[]>(initialRows);
   const [page, setPage] = useState(0); // 0-indexed
-  const [pageSize, setPageSize] = useState<number>(DEFAULT_SIZE);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
@@ -178,9 +178,9 @@ export function LogTable({
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const offset = page * pageSize;
 
-  // page/pageSize 변경 시에만 서버에서 해당 구간을 당겨온다. 첫 마운트(page 0·기본 크기)는
-  // 서버가 준 initialRows 를 그대로 쓰므로 skip(불필요한 재조회 방지). 필터가 바뀌면 부모가
-  // key 로 이 컴포넌트를 remount → 상태가 초기값으로 리셋된다.
+  // page 변경 시에만 서버에서 해당 구간을 당겨온다. 첫 마운트(page 0)는 서버가 준
+  // initialRows 를 그대로 쓰므로 skip(불필요한 재조회 방지). 필터·페이지 크기가 바뀌면
+  // 부모가 key 로 이 컴포넌트를 remount → 상태가 초기값으로 리셋된다.
   const didMount = useRef(false);
   useEffect(() => {
     if (!didMount.current) {
@@ -217,32 +217,23 @@ export function LogTable({
     return () => {
       cancelled = true;
     };
-    // sp/since/until 은 remount 로 고정이므로 deps 에서 제외(page·pageSize 만 관찰).
+    // sp/since/until/pageSize 는 remount 로 고정이므로 deps 에서 제외(page 만 관찰).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize]);
-
-  function changeSize(n: number) {
-    if (n === pageSize) return;
-    setPageSize(n);
-    setPage(0);
-  }
+  }, [page]);
 
   const rangeText =
     total === 0
       ? "0건"
       : `${(offset + 1).toLocaleString()}–${(offset + rows.length).toLocaleString()} / ${total.toLocaleString()}건`;
 
-  const chip = (on: boolean) =>
-    `rounded-md px-2.5 py-1 text-[13px] transition ${
-      on ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
-    }`;
   const navBtn =
     "rounded-md border border-border bg-card px-2.5 py-1 text-[13px] text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40";
 
   return (
     <>
       {/* table-fixed + 명시 칼럼 폭: 고정 칼럼을 뺀 남는 폭을 질문이 전부 받아 말줄임(…)
-          처리되므로 카드에 가로 스크롤이 생기지 않는다(overflow-x-auto 는 초소형 화면 안전핀). */}
+          처리되므로 카드에 가로 스크롤이 생기지 않는다(overflow-x-auto 는 초소형 화면 안전핀).
+          페이지당 건수 콤보는 상단 필터 행(PageSizeSelect)으로 이동. */}
       <section className="mt-6 overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
         <table className="w-full table-fixed border-collapse text-[13px]">
           <thead>
@@ -335,17 +326,9 @@ export function LogTable({
         </table>
       </section>
 
-      {/* 페이지네이션 — 좌: 페이지당 건수(10~300), 우: 범위·이전/다음. 필터 내 총건수(total)로
-          페이지 수를 산출한다. */}
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-1">
-        <div className="flex items-center gap-1">
-          <span className="mr-1 text-xs text-muted-foreground/70">페이지당</span>
-          {PAGE_SIZES.map((n) => (
-            <button key={n} onClick={() => changeSize(n)} className={chip(pageSize === n)} disabled={loading}>
-              {n}
-            </button>
-          ))}
-        </div>
+      {/* 페이지네이션 — 범위·이전/다음(페이지당 콤보는 표 상단으로 이동). 필터 내
+          총건수(total)로 페이지 수를 산출한다. */}
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-x-6 gap-y-2 py-1">
         <div className="flex items-center gap-3">
           <span className="text-xs tabular-nums text-muted-foreground">
             {loading ? "불러오는 중…" : error ? "불러오기 실패" : rangeText}

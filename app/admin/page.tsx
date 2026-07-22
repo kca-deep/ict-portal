@@ -10,6 +10,7 @@ import { UsageChart, RouteDonut } from "./charts";
 import { LogoutButton } from "./logout-button";
 import { Response } from "@/components/ui/response";
 import { LogTable } from "./log-table";
+import { PageSizeSelect } from "./page-size-select";
 import { getKoreanHolidaysForYears } from "@/lib/holidays";
 
 // 관리자 대시보드(쿼리로그 뷰어). 미들웨어(/admin 게이트)가 서명 쿠키를 통과시킨
@@ -72,6 +73,7 @@ function href(sp: SearchParams, patch: Record<string, string | undefined>): stri
     to: first(sp.to),
     sort: first(sp.sort),
     dir: first(sp.dir),
+    ps: first(sp.ps),
     log: first(sp.log),
     ...patch,
   };
@@ -150,8 +152,12 @@ export default async function AdminPage({
   const since = fromIso == null ? sinceFromPeriod(period) : fromClamped ? oneYearAgoIso : fromIso;
   const until = to ? `${to}T23:59:59` : undefined;
 
+  // 페이지당 건수 — 필터 행 콤보(?ps=)로 관리. 허용 목록 밖 값은 기본 10.
+  const psParam = Number(first(sp.ps));
+  const pageSize = [10, 20, 50, 100, 200, 300].includes(psParam) ? psParam : 10;
+
   const filter: QueryLogFilter = {
-    limit: 10, // 로그 표 기본 페이지 크기(10/20/50/100/200/300 중 기본)
+    limit: pageSize,
     route,
     hallucinationOnly,
     negativeOnly,
@@ -384,21 +390,11 @@ export default async function AdminPage({
             />
           </div>
 
-          {/* API 사용량 스트립: 제공자 기준 4칸(파이프라인 순: OpenAI 임베딩 → Cohere 재정렬
-              → Claude 답변·보조 → 법제처). 청구서 단위와 1:1 로 맞춰 비용 추적이 직관적이도록.
+          {/* API 사용량 스트립: 제공자 기준 4칸(비중 순: Claude 답변·보조 → 법제처 → Cohere
+              재정렬 → OpenAI 임베딩). 청구서 단위와 1:1 로 맞춰 비용 추적이 직관적이도록.
               Claude 는 tokens_in/out(답변)+api_usage(보조) 합, 나머지는 api_usage jsonb
               (계측 도입 후 행만). */}
           <div className="grid grid-cols-2 border-t border-border bg-muted/40 sm:grid-cols-4">
-            <Kpi
-              label="OpenAI API"
-              value={`${fmtCount(stats.api.embedTokens)} 토큰`}
-              note={`임베딩 · ${stats.api.embedCalls.toLocaleString()}회`}
-            />
-            <Kpi
-              label="Cohere API"
-              value={`${fmtCount(stats.api.cohereUnits)} unit`}
-              note={`재정렬 · ${stats.api.cohereCalls.toLocaleString()}회`}
-            />
             <Kpi
               label="Claude API"
               value={`${fmtCount(
@@ -413,12 +409,29 @@ export default async function AdminPage({
               value={`${fmtCount(stats.api.lawCalls)}회`}
               note="법령 조회 · DRF"
             />
+            <Kpi
+              label="Cohere API"
+              value={`${fmtCount(stats.api.cohereUnits)} unit`}
+              note={`재정렬 · ${stats.api.cohereCalls.toLocaleString()}회`}
+            />
+            <Kpi
+              label="OpenAI API"
+              value={`${fmtCount(stats.api.embedTokens)} 토큰`}
+              note={`임베딩 · ${stats.api.embedCalls.toLocaleString()}회`}
+            />
           </div>
         </section>
 
-        {/* 필터 */}
-        <section className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px]">
-          <form method="get" action="/admin" className="flex flex-wrap items-center gap-2">
+        {/* 필터 행 — 요소별 아웃라인 그룹(shadcn outline: border+rounded-lg+shadow-xs)을
+            1열로 촘촘히(gap-2) 배열. 그룹: ①검색·기간 ②분기 세그먼트 ③품질 토글
+            ④페이지당 콤보 (+조건부 IP 칩). 세그먼트 내부는 divide-x 로 등간격. */}
+        <section className="mt-6 flex flex-wrap items-stretch gap-2 text-[13px]">
+          {/* ① 검색·기간 */}
+          <form
+            method="get"
+            action={ADMIN_BASE}
+            className="flex items-stretch divide-x divide-border overflow-hidden rounded-lg border border-border bg-card shadow-xs"
+          >
             {period && <input type="hidden" name="period" value={period} />}
             {route && <input type="hidden" name="route" value={route} />}
             {hallucinationOnly && <input type="hidden" name="halluc" value="1" />}
@@ -426,42 +439,43 @@ export default async function AdminPage({
             {ip && <input type="hidden" name="ip" value={ip} />}
             {sort && <input type="hidden" name="sort" value={sort} />}
             {sortDir && <input type="hidden" name="dir" value={sortDir} />}
+            {pageSize !== 10 && <input type="hidden" name="ps" value={pageSize} />}
             <input
               type="search"
               name="q"
               defaultValue={search ?? ""}
               placeholder="질문·답변 검색"
-              className="w-56 rounded-md border border-border bg-card px-3 py-1.5 text-[13px] outline-none focus:border-primary"
+              className="w-52 bg-transparent px-3 py-1.5 outline-none placeholder:text-muted-foreground/70"
             />
             <input
               type="date"
               name="from"
               defaultValue={from ?? ""}
-              className="rounded-md border border-border bg-card px-2.5 py-1.5 text-[13px] text-muted-foreground outline-none focus:border-primary"
+              className="bg-transparent px-2.5 py-1.5 text-muted-foreground outline-none"
             />
-            <span className="text-muted-foreground/60">~</span>
             <input
               type="date"
               name="to"
               defaultValue={to ?? ""}
-              className="rounded-md border border-border bg-card px-2.5 py-1.5 text-[13px] text-muted-foreground outline-none focus:border-primary"
+              className="bg-transparent px-2.5 py-1.5 text-muted-foreground outline-none"
             />
             <button
               type="submit"
-              className="rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground transition hover:opacity-90"
+              className="bg-primary px-3 py-1.5 font-medium text-primary-foreground transition hover:opacity-90"
             >
               조회
             </button>
           </form>
-          <div className="flex items-center gap-1">
-            <span className="mr-1 text-xs text-muted-foreground/70">분기</span>
+
+          {/* ② 분기 세그먼트 — 등간격(px-3 통일) */}
+          <div className="flex items-stretch divide-x divide-border overflow-hidden rounded-lg border border-border bg-card shadow-xs">
             {routeChips.map(([label, value]) => {
               const on = route === value || (!route && !value);
               return (
                 <Link
                   key={label}
                   href={href(sp, { route: value, log: undefined })}
-                  className={`rounded-md px-2.5 py-1 transition ${
+                  className={`flex items-center px-3 py-1.5 transition ${
                     on ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
                   }`}
                 >
@@ -470,30 +484,58 @@ export default async function AdminPage({
               );
             })}
           </div>
-          <Link
-            href={href(sp, { halluc: hallucinationOnly ? undefined : "1", log: undefined })}
-            className={`rounded-md px-2.5 py-1 transition ${
-              hallucinationOnly
-                ? "bg-destructive text-destructive-foreground"
-                : "text-muted-foreground hover:bg-muted"
-            }`}
-          >
-            환각만
-          </Link>
-          <Link
-            href={href(sp, { neg: negativeOnly ? undefined : "1", log: undefined })}
-            className={`rounded-md px-2.5 py-1 transition ${
-              negativeOnly
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted"
-            }`}
-          >
-            부정만
-          </Link>
+
+          {/* ③ 품질 토글 — 분기 세그먼트와 동일 등간격 */}
+          <div className="flex items-stretch divide-x divide-border overflow-hidden rounded-lg border border-border bg-card shadow-xs">
+            <Link
+              href={href(sp, { halluc: hallucinationOnly ? undefined : "1", log: undefined })}
+              className={`flex items-center px-3 py-1.5 transition ${
+                hallucinationOnly
+                  ? "bg-destructive text-destructive-foreground"
+                  : "text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              환각만
+            </Link>
+            <Link
+              href={href(sp, { neg: negativeOnly ? undefined : "1", log: undefined })}
+              className={`flex items-center px-3 py-1.5 transition ${
+                negativeOnly
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              부정만
+            </Link>
+          </div>
+
+          {/* ④ 페이지당 콤보 */}
+          <div className="flex items-center overflow-hidden rounded-lg border border-border bg-card shadow-xs">
+            <span className="border-r border-border px-2.5 py-1.5 text-xs text-muted-foreground/70">
+              페이지당
+            </span>
+            <PageSizeSelect
+              value={pageSize}
+              base={ADMIN_BASE}
+              query={{
+                period,
+                route,
+                halluc: hallucinationOnly ? "1" : undefined,
+                neg: negativeOnly ? "1" : undefined,
+                ip,
+                q: search,
+                from,
+                to,
+                sort,
+                dir: sortDir,
+              }}
+            />
+          </div>
+
           {ip && (
             <Link
               href={href(sp, { ip: undefined, log: undefined })}
-              className="rounded-md px-2.5 py-1 font-mono text-muted-foreground transition hover:bg-muted"
+              className="flex items-center rounded-lg border border-border bg-card px-3 py-1.5 font-mono text-muted-foreground shadow-xs transition hover:bg-muted"
             >
               IP={ip} ✕
             </Link>
@@ -503,14 +545,15 @@ export default async function AdminPage({
         {/* 상세 */}
         {detail && <DetailPanel sp={sp} detail={detail} />}
 
-        {/* 로그 표 — 초기 20건, "더 조회하기"로 20건씩 이어붙임(SPA) */}
+        {/* 로그 표 — 초기 한 페이지(ps 크기)는 서버 렌더, 페이지 이동은 SPA 페치 */}
         <LogTable
-          key={[period, route, hallucinationOnly, negativeOnly, ip, search, from, to, sort, sortDir]
+          key={[period, route, hallucinationOnly, negativeOnly, ip, search, from, to, sort, sortDir, pageSize]
             .map((v) => v ?? "")
             .join("|")}
           initialRows={rows}
           total={stats.total}
           holidays={holidayKeys}
+          pageSize={pageSize}
           sp={{
             base: ADMIN_BASE,
             period,
@@ -523,6 +566,7 @@ export default async function AdminPage({
             to,
             sort,
             dir: sortDir,
+            ps: pageSize !== 10 ? String(pageSize) : undefined,
           }}
           since={filter.since}
           until={filter.until}
