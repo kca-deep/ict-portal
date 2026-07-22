@@ -13,7 +13,7 @@
       <stop offset="0" stop-color="#ffc62b"/><stop offset="1" stop-color="#f5a50d"/>
     </linearGradient>
   </defs>
-  <rect x="48" y="34" width="304" height="304" rx="64" fill="#ffffff" stroke="url(#favSky)" stroke-width="26"/>
+  <rect x="48" y="34" width="304" height="304" rx="100" fill="#ffffff" stroke="url(#favSky)" stroke-width="26"/>
   <path d="M118 302 L80 380 Q74 394 90 385 L170 334 Q178 329 170 322 L132 296 Q123 290 118 302 Z" fill="url(#favTail)"/>
   <text x="200" y="256" text-anchor="middle"
         font-family="'Pretendard','Segoe UI',Arial,sans-serif" font-weight="800"

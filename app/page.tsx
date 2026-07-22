@@ -498,6 +498,7 @@ export default function Home() {
                   className="font-semibold"
                   style={{
                     color: "#1e3a8a",
+                    WebkitTextStroke: "0.8px rgba(255,255,255,0.85)", // 얇은 흰 테두리
                     textShadow:
                       "0 0 14px rgba(80,140,235,0.45), 0 0 34px rgba(80,140,235,0.25)",
                   }}
