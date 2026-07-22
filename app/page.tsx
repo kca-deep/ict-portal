@@ -487,14 +487,23 @@ export default function Home() {
              pb 로 헤더 높이(약 60px)만큼 보정 → 헤더 포함 전체 뷰포트 기준 정중앙. */
           <div className="flex-1 flex flex-col items-center justify-center px-4 pb-[60px]">
             <div className="w-full max-w-3xl flex flex-col items-center text-center">
-              {/* 인사말 — 본문은 진한 회색(foreground 80%)으로 통일, 서비스명만
-                  파란 계열(primary) 하이라이트로 강조. */}
+              {/* 인사말 — 본문은 저채도 회색(muted) 한 톤 낮춤, 서비스명은 진한 남색
+                  + 파란 후광(text-shadow 이중 글로우)으로 강조. */}
               <p
-                className="mb-7 text-3xl font-medium leading-snug tracking-tight text-foreground/80"
+                className="mb-7 text-3xl font-medium leading-snug tracking-tight text-muted-foreground"
                 style={{ fontFamily: "var(--font-display)" }}
               >
                 안녕하세요.{" "}
-                <span className="font-semibold text-primary">ICT기금 AI 어드바이저</span>
+                <span
+                  className="font-semibold"
+                  style={{
+                    color: "#1e3a8a",
+                    textShadow:
+                      "0 0 14px rgba(80,140,235,0.45), 0 0 34px rgba(80,140,235,0.25)",
+                  }}
+                >
+                  ICT기금 AI 어드바이저
+                </span>
                 입니다.
                 <br />
                 무엇을 도와드릴까요?
