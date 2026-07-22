@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="PIMS">
   <!-- 파비콘 — 앱 로고(말풍선+PIMS)를 소형에서 읽히도록 "말풍선+P"로 단순화.
-       색·형태(하늘색 테두리 말풍선, 주황 그라디언트 꼬리·P)는 헤더 로고와 동일 계열. -->
+       말풍선은 원형 아웃라인(파비콘 정사각 캔버스에 맞춤), 색 계열(하늘색 테두리·
+       주황 그라디언트 꼬리·P)은 헤더 로고와 동일. -->
   <defs>
     <linearGradient id="favSky" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#6fb7f0"/><stop offset="1" stop-color="#3d93de"/>
@@ -12,9 +13,9 @@
       <stop offset="0" stop-color="#ffc62b"/><stop offset="1" stop-color="#f5a50d"/>
     </linearGradient>
   </defs>
-  <rect x="24" y="48" width="352" height="252" rx="88" fill="#ffffff" stroke="url(#favSky)" stroke-width="26"/>
-  <path d="M112 286 L74 372 Q68 386 84 377 L162 322 Q170 317 163 311 L124 283 Q116 277 112 286 Z" fill="url(#favTail)"/>
-  <text x="200" y="248" text-anchor="middle"
+  <circle cx="200" cy="186" r="152" fill="#ffffff" stroke="url(#favSky)" stroke-width="26"/>
+  <path d="M118 302 L80 380 Q74 394 90 385 L170 334 Q178 329 170 322 L132 296 Q123 290 118 302 Z" fill="url(#favTail)"/>
+  <text x="200" y="256" text-anchor="middle"
         font-family="'Pretendard','Segoe UI',Arial,sans-serif" font-weight="800"
         font-size="200" fill="url(#favP)">P</text>
 </svg>
