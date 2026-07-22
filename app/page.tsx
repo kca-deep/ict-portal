@@ -488,9 +488,11 @@ export default function Home() {
           <div className="flex-1 flex flex-col items-center justify-center px-4 pb-[60px]">
             <div className="w-full max-w-3xl flex flex-col items-center text-center">
               <p
-                className="mb-7 text-3xl font-medium tracking-tight text-foreground"
+                className="mb-7 text-3xl font-medium leading-snug tracking-tight text-foreground"
                 style={{ fontFamily: "var(--font-display)" }}
               >
+                안녕하세요. ICT기금 AI어드바이저입니다.
+                <br />
                 무엇을 도와드릴까요?
               </p>
               <div className="w-full max-w-[700px] relative">
