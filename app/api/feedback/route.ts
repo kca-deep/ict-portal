@@ -18,9 +18,13 @@ function clientIp(req: NextRequest): string | undefined {
 
 export async function POST(req: NextRequest) {
   // 봇 차단 — layout 의 <BotIdClient> 가 /api/feedback 신호를 첨부한다.
+  // BOTID_ENFORCEMENT=off 면 관찰 모드(로그만) — chat 라우트와 동일 정책.
   const bot = await checkBotId();
   if (bot.isBot) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    console.warn("[feedback] botid flagged:", JSON.stringify(bot));
+    if (process.env.BOTID_ENFORCEMENT !== "off") {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
   }
   if (!(await checkFeedbackRateLimit(clientIp(req))).ok) {
     return NextResponse.json({ error: "too many requests" }, { status: 429 });

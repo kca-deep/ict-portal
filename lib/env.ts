@@ -74,6 +74,9 @@ const envSchema = z.object({
   // 교차 출처 허용 목록(쉼표 구분, 미들웨어 소비). 미설정 = 순수 동일 출처(현행 그대로).
   // Vercel 기본 도메인 사용 시 예: https://<프로젝트>.vercel.app
   ALLOWED_ORIGINS: z.string().optional(),
+  // BotID 집행 모드 — "off" 면 판정을 로그로만 남기고 차단 안 함(오탐 조사·비상 개방용).
+  // 미설정(기본) = 차단(enforce). 라우트가 process.env 직접 참조, 여기선 문서화용.
+  BOTID_ENFORCEMENT: z.enum(["on", "off"]).optional(),
   // 가장자리 슬래시는 미들웨어·페이지가 정규화하므로 허용(설정 실수 방어), 본체는 URL-safe 만.
   ADMIN_PATH_SECRET: z
     .string()
