@@ -15,6 +15,23 @@ export function clientIpFrom(xff: string | null): string | null {
   return first || null;
 }
 
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/**
+ * 허용목록 검사에 쓸 접속자 IP를 정한다.
+ *
+ * 로컬 프로덕션 스모크(`pnpm build && pnpm start`)에는 앞단 프록시가 없어
+ * x-forwarded-for 가 아예 없다 → 기존엔 null 이라 ADMIN_ALLOWED_IPS 에 무엇을 넣든
+ * 관리자 화면이 404 로 은닉됐다. 호스트가 루프백일 때만 127.0.0.1 로 간주해
+ * 허용목록 검사에 태운다(허용 여부는 여전히 ADMIN_ALLOWED_IPS 가 결정).
+ * Vercel 배포에서는 엣지가 항상 x-forwarded-for 를 채우므로 이 분기에 닿지 않는다.
+ */
+export function resolveClientIp(xff: string | null, hostname: string): string | null {
+  const ip = clientIpFrom(xff);
+  if (ip) return ip;
+  return LOOPBACK_HOSTS.has(hostname) ? "127.0.0.1" : null;
+}
+
 function ipv4ToInt(ip: string): number | null {
   const parts = ip.split(".");
   if (parts.length !== 4) return null;

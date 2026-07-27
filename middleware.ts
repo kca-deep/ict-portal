@@ -4,7 +4,7 @@ import {
   adminSessionSecret,
   verifySession,
 } from "@/lib/admin-auth";
-import { clientIpFrom, ipAllowed, parseAllowlist } from "@/lib/admin-ip";
+import { ipAllowed, parseAllowlist, resolveClientIp } from "@/lib/admin-ip";
 
 // 정적 호환 CSP. ⚠️ 이전의 nonce+'strict-dynamic' 방식은 프로덕션 전면 장애 원인이었다:
 // Turbopack 프로덕션 빌드가 미들웨어 nonce 를 문서 스크립트에 부착하지 않는 것을 실측
@@ -105,7 +105,10 @@ export async function middleware(req: NextRequest) {
   if (isAdminPage || isAdminApi) {
     if (process.env.NODE_ENV === "production") {
       const allow = parseAllowlist(process.env.ADMIN_ALLOWED_IPS);
-      const ip = clientIpFrom(req.headers.get("x-forwarded-for"));
+      const ip = resolveClientIp(
+        req.headers.get("x-forwarded-for"),
+        req.nextUrl.hostname,
+      );
       if (!ipAllowed(ip, allow)) return hidden(req);
     }
   }
