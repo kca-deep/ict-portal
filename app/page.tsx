@@ -493,7 +493,6 @@ export default function Home() {
                 className="mb-7 text-3xl font-medium leading-snug tracking-tight text-muted-foreground"
                 style={{ fontFamily: "var(--font-display)" }}
               >
-                안녕하세요.{" "}
                 <span
                   className="font-semibold"
                   style={{
@@ -502,7 +501,7 @@ export default function Home() {
                       "0 0 14px rgba(80,140,235,0.45), 0 0 34px rgba(80,140,235,0.25)",
                   }}
                 >
-                  ICT기금 AI 어드바이저
+                  AI 어드바이저
                 </span>
                 입니다.
                 <br />
