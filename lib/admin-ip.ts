@@ -16,20 +16,24 @@ export function clientIpFrom(xff: string | null): string | null {
 }
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+const LOOPBACK_IPS = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 /**
  * 허용목록 검사에 쓸 접속자 IP를 정한다.
  *
- * 로컬 프로덕션 스모크(`pnpm build && pnpm start`)에는 앞단 프록시가 없어
- * x-forwarded-for 가 아예 없다 → 기존엔 null 이라 ADMIN_ALLOWED_IPS 에 무엇을 넣든
- * 관리자 화면이 404 로 은닉됐다. 호스트가 루프백일 때만 127.0.0.1 로 간주해
- * 허용목록 검사에 태운다(허용 여부는 여전히 ADMIN_ALLOWED_IPS 가 결정).
- * Vercel 배포에서는 엣지가 항상 x-forwarded-for 를 채우므로 이 분기에 닿지 않는다.
+ * 로컬 프로덕션 스모크(`pnpm build && pnpm start`)에는 앞단 프록시가 없다. 이때
+ * next start 가 x-forwarded-for 를 소켓 remoteAddress 로 직접 채우는데, 브라우저가
+ * localhost 로 붙으면 그 값이 IPv6 루프백 "::1" 이라 ADMIN_ALLOWED_IPS 에 무엇을
+ * 넣든 관리자 화면이 404 로 은닉됐다. 그래서 호스트가 루프백일 때만 루프백 표기
+ * (::1 · ::ffff:127.0.0.1)를 127.0.0.1 로 정규화하고, 헤더 자체가 없어도 동일하게
+ * 간주해 허용목록 검사에 태운다(허용 여부는 여전히 ADMIN_ALLOWED_IPS 가 결정).
+ * Vercel 배포에서는 호스트가 실제 도메인이라 이 분기에 닿지 않는다.
  */
 export function resolveClientIp(xff: string | null, hostname: string): string | null {
   const ip = clientIpFrom(xff);
-  if (ip) return ip;
-  return LOOPBACK_HOSTS.has(hostname) ? "127.0.0.1" : null;
+  const loopbackHost = LOOPBACK_HOSTS.has(hostname);
+  if (ip) return loopbackHost && LOOPBACK_IPS.has(ip) ? "127.0.0.1" : ip;
+  return loopbackHost ? "127.0.0.1" : null;
 }
 
 function ipv4ToInt(ip: string): number | null {
