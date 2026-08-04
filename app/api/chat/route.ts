@@ -123,9 +123,12 @@ async function rerankUnifiedPool(
       query,
       pool.map((p, i) => ({
         id: i,
+        // 소스 대칭 — 법령은 법령명+조문제목이 붙는데 규정 청크가 본문만 들어가면
+        // 표·별지 파편이 소속 문서 맥락 없이 채점돼 구조적으로 저평가된다
+        // (실측: 정답 청크 0.17 → 제목 동봉 시 0.31, 2026-08). 제목을 함께 넣는다.
         text:
           p.kind === "regulation"
-            ? p.hit.content
+            ? [p.hit.title, p.hit.content].filter(Boolean).join("\n")
             : `${p.hit.name} ${p.hit.articleTitle}\n${p.hit.body}`,
       })),
       topN,
@@ -334,7 +337,15 @@ export async function POST(req: NextRequest) {
         if (intentPools.length === 0) {
           const ranked = await rerankUnifiedPool(query, hits, lawCand.hits);
           maxScore = ranked.length > 0 ? ranked[0].score : 0;
-          picked = ranked.filter((r) => r.score >= env.RELEVANCE_THRESHOLD);
+          // B안 선발을 단일 의도 경로에도 동일 적용 — 상위 2건은 완화 문턱, 그 밖은
+          // 기본 문턱. 분해 여부(보조 LLM 판정)에 따라 선발 잣대가 달라지는 비일관
+          // 제거. 정답이 표·별지 파편이라 0.25~0.33 대역에 걸리는 질의(예: 범칙금
+          // 불인정 기준)를 무근거 답변으로 흘리지 않는다.
+          picked = ranked.filter(
+            (r, idx) =>
+              r.score >=
+              (idx < 2 ? env.RELEVANCE_INTENT_FLOOR : env.RELEVANCE_THRESHOLD),
+          );
         } else {
           const perIntentCap = Math.max(
             2,

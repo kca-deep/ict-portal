@@ -31,7 +31,7 @@ async function main() {
     ...hits.map((h) => ({
       kind: "규정" as const,
       label: h.title ?? `(문서 ${h.id})`,
-      text: h.content,
+      text: [h.title, h.content].filter(Boolean).join("\n"),
     })),
     ...lawCand.hits.map((h) => ({
       kind: "법령" as const,
@@ -53,16 +53,24 @@ async function main() {
   const maxScore = reranked.length > 0 ? reranked[0].score : 0;
   const belowThreshold = maxScore < env.RELEVANCE_THRESHOLD;
   console.log(`\n▶ 통합 top-${env.RERANK_TOP_K}:`);
-  for (const r of reranked) {
+  reranked.forEach((r, idx) => {
     const p = pool[r.id as number];
-    const pass = r.score >= env.RELEVANCE_THRESHOLD;
+    // route.ts B안 선발과 동일 — 상위 2건은 완화 문턱, 그 밖은 기본 문턱.
+    const floor = idx < 2 ? env.RELEVANCE_INTENT_FLOOR : env.RELEVANCE_THRESHOLD;
+    const pass = r.score >= floor;
     console.log(
-      `  ${pass ? "✓주입" : "✗제외"} [${p.kind}] ${r.score.toFixed(3)}  ${p.label}`,
+      `  ${pass ? "✓주입" : "✗제외"} [${p.kind}] ${r.score.toFixed(3)}(문턱 ${floor})  ${p.label}`,
     );
-  }
+  });
+  // route.ts 3단계와 동일 — 근거 없음 = 선발 0건 (belowThreshold 는 로그 신호일 뿐).
+  const injectedCount = reranked.filter(
+    (r, idx) =>
+      r.score >=
+      (idx < 2 ? env.RELEVANCE_INTENT_FLOOR : env.RELEVANCE_THRESHOLD),
+  ).length;
   console.log(
-    `\n▶ maxScore=${maxScore.toFixed(3)} belowThreshold=${belowThreshold}` +
-      (belowThreshold
+    `\n▶ maxScore=${maxScore.toFixed(3)} belowThreshold=${belowThreshold} 주입=${injectedCount}건` +
+      (injectedCount === 0
         ? " → 근거 없음(범위 게이트로: 범위 내면 정직 무근거 답변 / 범위 밖이면 거절)"
         : " → unified 주입 진행"),
   );
