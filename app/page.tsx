@@ -561,9 +561,11 @@ export default function Home() {
                             aria-hidden
                           />
                           <span>
-                            본 답변은 참고용 안내이며 확정적 법률 자문이 아닙니다.
-                            최종 판단은 법제처 원문 및 소관 부서 확인을 거치시기
-                            바랍니다.
+                            답변은 단순 참고용 안내이며, 법적 효력을 갖는 확정적
+                            법률 자문이 아닙니다.
+                            <br />
+                            정확한 판단은 법률 전문가와 소관 부처를 통한 확인을
+                            거치시기 바랍니다.
                           </span>
                         </div>
                         <div className="mt-2 flex items-center gap-2">
