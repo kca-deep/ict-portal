@@ -18,6 +18,11 @@ export function clientIpFrom(xff: string | null): string | null {
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 const LOOPBACK_IPS = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
+/** 요청 호스트가 루프백인지(= 로컬에서 띄운 앱에 붙은 접속인지). */
+export function isLoopbackHost(hostname: string): boolean {
+  return LOOPBACK_HOSTS.has(hostname);
+}
+
 /**
  * 허용목록 검사에 쓸 접속자 IP를 정한다.
  *

@@ -4,7 +4,12 @@ import {
   adminSessionSecret,
   verifySession,
 } from "@/lib/admin-auth";
-import { ipAllowed, parseAllowlist, resolveClientIp } from "@/lib/admin-ip";
+import {
+  ipAllowed,
+  isLoopbackHost,
+  parseAllowlist,
+  resolveClientIp,
+} from "@/lib/admin-ip";
 
 // 정적 호환 CSP. ⚠️ 이전의 nonce+'strict-dynamic' 방식은 프로덕션 전면 장애 원인이었다:
 // Turbopack 프로덕션 빌드가 미들웨어 nonce 를 문서 스크립트에 부착하지 않는 것을 실측
@@ -93,17 +98,27 @@ export async function middleware(req: NextRequest) {
   //    개발은 검사 생략. 화면(page)과 API(/api/admin/*) 모두 커버.
   // 슬러그 앞뒤 슬래시는 정규화 — "/pims-x" 처럼 넣어도 "pims-x" 로 동작(설정 실수 방어).
   const slug = (process.env.ADMIN_PATH_SECRET ?? "").replace(/^\/+|\/+$/g, "");
-  const adminBase = slug ? `/${slug}` : "/admin";
-  const isAdminPage = pathname === adminBase || pathname.startsWith(`${adminBase}/`);
-  const isAdminApi = pathname.startsWith("/api/admin");
 
-  // 슬러그 모드에서 /admin 직접 접근은 은닉(내부 경로 노출 방지).
-  if (slug && (pathname === "/admin" || pathname.startsWith("/admin/"))) {
+  // C) 로컬 구동 예외: 루프백 호스트로 붙은 접속에는 슬러그 은닉·IP 허용목록을 걸지
+  //    않는다 — `pnpm dev`/`pnpm start` 로 띄운 앱에서 /admin 이 바로 열려야 배포 전
+  //    스모크(관리자 로그인 1회)가 가능하다. 판정에 VERCEL 런타임 플래그를 함께 두어
+  //    배포 환경에서는 Host 헤더를 위조해도 이 예외에 닿지 않게 한다. 비밀번호 세션
+  //    검사는 로컬에서도 그대로 유지된다(열리는 것은 로그인 폼까지).
+  const isLocal = !process.env.VERCEL && isLoopbackHost(req.nextUrl.hostname);
+  const directAdmin = pathname === "/admin" || pathname.startsWith("/admin/");
+
+  // 슬러그 모드에서 /admin 직접 접근은 은닉(내부 경로 노출 방지). 로컬은 예외.
+  if (slug && directAdmin && !isLocal) {
     return hidden(req);
   }
 
+  // 로컬에서 /admin 으로 들어온 요청은 슬러그 rewrite 없이 그대로 처리한다.
+  const adminBase = slug && !(isLocal && directAdmin) ? `/${slug}` : "/admin";
+  const isAdminPage = pathname === adminBase || pathname.startsWith(`${adminBase}/`);
+  const isAdminApi = pathname.startsWith("/api/admin");
+
   if (isAdminPage || isAdminApi) {
-    if (process.env.NODE_ENV === "production") {
+    if (process.env.NODE_ENV === "production" && !isLocal) {
       const allow = parseAllowlist(process.env.ADMIN_ALLOWED_IPS);
       const ip = resolveClientIp(
         req.headers.get("x-forwarded-for"),
@@ -124,7 +139,8 @@ export async function middleware(req: NextRequest) {
       }
     }
     // 슬러그 경로를 내부 /admin 라우트로 rewrite. 문서 요청은 CSP 도 함께.
-    if (slug) {
+    // (로컬 /admin 직접 접근은 adminBase 가 이미 "/admin" 이라 rewrite 대상이 아니다.)
+    if (adminBase !== "/admin") {
       const rest = pathname.slice(adminBase.length); // "" | "/login" | ...
       const target = new URL(`/admin${rest}${req.nextUrl.search}`, req.url);
       const isDoc = req.headers.get("accept")?.includes("text/html");
