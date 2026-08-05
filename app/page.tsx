@@ -2,6 +2,7 @@
 
 import {
   SquarePen,
+  Download,
   Copy,
   Check,
   ArrowUp,
@@ -10,6 +11,7 @@ import {
   ThumbsUp,
   ThumbsDown,
 } from "lucide-react";
+import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { Response } from "@/components/ui/response";
 import {
@@ -410,49 +412,14 @@ export default function Home() {
             }`}
           >
           <div className="flex items-center gap-3">
-            <svg
-              viewBox="10 78 380 292"
-              role="img"
-              aria-label="PIMS 어드바이저 로고"
-              className="h-14 w-[72px] shrink-0"
-            >
-              <defs>
-                <linearGradient id="pimsAppSky" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0" stopColor="#6fb7f0" />
-                  <stop offset="1" stopColor="#3d93de" />
-                </linearGradient>
-                <linearGradient id="pimsAppTail" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0" stopColor="#ffce5c" />
-                  <stop offset="1" stopColor="#f39b1e" />
-                </linearGradient>
-                <linearGradient id="pimsAppP" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stopColor="#ffc62b" />
-                  <stop offset="1" stopColor="#f5a50d" />
-                </linearGradient>
-              </defs>
-              <rect
-                x="28"
-                y="102"
-                width="344"
-                height="180"
-                rx="66"
-                fill="#ffffff"
-                stroke="url(#pimsAppSky)"
-                strokeWidth="15"
-              />
-              <path d="M115 269 L82 350 Q76 362 90 354 L159 308 Q166 304 160 299 L124 267 Q118 262 115 269 Z" fill="url(#pimsAppTail)" />
-              <text
-                x="200"
-                y="224"
-                textAnchor="middle"
-                fontFamily="'Pretendard','Segoe UI',Arial,sans-serif"
-                fontWeight="800"
-                letterSpacing="1"
-              >
-                <tspan fontSize="112" fill="url(#pimsAppP)">P</tspan>
-                <tspan fontSize="100" fill="#2a7df0">IMS</tspan>
-              </text>
-            </svg>
+            <Image
+              src="/pims-logo-3d.png"
+              alt="PIMS 어드바이저 로고"
+              width={512}
+              height={480}
+              priority
+              className="h-14 w-auto shrink-0"
+            />
             <div className="flex flex-col justify-center h-14">
               <h1
                 className="text-xl font-bold leading-tight tracking-tight text-foreground"
@@ -465,15 +432,39 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <button
-            onClick={resetChat}
-            disabled={loading || messages.length === 0}
-            aria-label="새 대화"
-            title="새 대화"
-            className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 p-2 rounded-md hover:bg-card"
-          >
-            <SquarePen className="w-5 h-5" aria-hidden="true" />
-          </button>
+          <div className="flex items-center gap-1">
+            {/* ICT기금사업 FAQ 원문(PDF) 내려받기 — 표지 타이포(100문&100답 / 외곽선 FAQ) 재현 */}
+            <a
+              href="/docs/ict-fund-faq-100.pdf"
+              download="2026년 ICT기금사업 FAQ(100문100답).pdf"
+              title="2026년 ICT기금사업 FAQ 100문 100답 내려받기"
+              className="group flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 transition-colors hover:border-primary/40"
+            >
+              <Download
+                className="w-4 h-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
+                aria-hidden="true"
+              />
+              <span
+                className="text-[15px] font-black leading-none tracking-tight text-primary"
+                style={{ fontFamily: "var(--font-display)" }}
+              >
+                100문
+                <span className="text-[10px] font-bold align-super text-muted-foreground">
+                  &amp;
+                </span>
+                <span className="text-[#ef7f1a]">100답</span>
+              </span>
+            </a>
+            <button
+              onClick={resetChat}
+              disabled={loading || messages.length === 0}
+              aria-label="새 대화"
+              title="새 대화"
+              className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 p-2 rounded-md hover:bg-card"
+            >
+              <SquarePen className="w-5 h-5" aria-hidden="true" />
+            </button>
+          </div>
           </div>
         </header>
 
