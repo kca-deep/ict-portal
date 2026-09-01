@@ -22,6 +22,11 @@ import {
 // 이 앱은 모든 fetch 가 상대경로(동일 출처)라 미설정 기본값으로도 프로덕션 정상 동작한다.
 // 다른 출처의 페이지가 이 API 를 부르거나 프리뷰↔프로덕션 교차 호출 구성이 생길 때만
 // 설정. 설정 시 ① /api/* CORS 응답 헤더 ② CSP connect-src 에 함께 반영된다.
+// ⚠️ 임시 스위치(2026-09) — 관리자 IP 허용목록 게이트 개방.
+// true: ADMIN_ALLOWED_IPS 를 무시하고 관리자 표면(/{slug}·/admin·/api/admin)을 전체 허용.
+// 기관 고정 IP(SSLVPN egress) 확정 전까지만 유지하고, 확정되면 false 로 되돌린다.
+const ADMIN_IP_GATE_OPEN = true;
+
 function allowedOrigins(): string[] {
   return (process.env.ALLOWED_ORIGINS ?? "")
     .split(",")
@@ -118,7 +123,10 @@ export async function middleware(req: NextRequest) {
   const isAdminApi = pathname.startsWith("/api/admin");
 
   if (isAdminPage || isAdminApi) {
-    if (process.env.NODE_ENV === "production" && !isLocal) {
+    // ⚠️ 임시 전체 허용(2026-09): ADMIN_IP_GATE_OPEN 이 true 인 동안 IP 허용목록 검사를
+    //    건너뛴다(기관 egress IP 확정 전 관리자 화면 접근용). 비밀번호 세션 검사는 그대로.
+    //    되돌리기: ADMIN_IP_GATE_OPEN = false + Vercel env ADMIN_ALLOWED_IPS 에 고정 IP.
+    if (!ADMIN_IP_GATE_OPEN && process.env.NODE_ENV === "production" && !isLocal) {
       const allow = parseAllowlist(process.env.ADMIN_ALLOWED_IPS);
       const ip = resolveClientIp(
         req.headers.get("x-forwarded-for"),
