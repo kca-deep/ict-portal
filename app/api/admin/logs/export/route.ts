@@ -11,13 +11,14 @@ export const runtime = "nodejs";
 // 대량 조회 + 워크북 직렬화. 기본 타임아웃으로는 큰 범위에서 잘릴 수 있어 넉넉히 잡는다.
 export const maxDuration = 120;
 
-function fileName(): string {
+// 파일명은 KST 시각 도장. 한글명(filename*)과 ASCII 폴백(filename)을 함께 만든다.
+function fileNames(): { name: string; ascii: string } {
   const kst = new Date(Date.now() + 9 * 3600 * 1000);
   const p = (n: number) => String(n).padStart(2, "0");
   const stamp =
     `${kst.getUTCFullYear()}${p(kst.getUTCMonth() + 1)}${p(kst.getUTCDate())}` +
     `_${p(kst.getUTCHours())}${p(kst.getUTCMinutes())}`;
-  return `PIMS_쿼리로그_${stamp}.xlsx`;
+  return { name: `PIMS_쿼리로그_${stamp}.xlsx`, ascii: `pims-query-log-${stamp}.xlsx` };
 }
 
 export async function GET(req: NextRequest) {
@@ -34,8 +35,7 @@ export async function GET(req: NextRequest) {
     const { rows, truncated } = await listQueryLogsForExport(filter);
     const buf = await buildQueryLogWorkbook(rows, filter, truncated);
     // 파일명이 한글이라 ASCII 폴백(filename)과 RFC 5987(filename*)을 함께 보낸다.
-    const name = fileName();
-    const ascii = `pims-query-log-${name.slice(-19)}`; // ...YYYYMMDD_HHmm.xlsx
+    const { name, ascii } = fileNames();
     return new NextResponse(new Uint8Array(buf), {
       headers: {
         "content-type":
