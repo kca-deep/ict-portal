@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Download } from "lucide-react";
 import {
   listQueryLogs,
   queryLogStats,
@@ -168,6 +169,20 @@ export default async function AdminPage({
     sort,
     sortDir,
   };
+
+  // 엑셀 내보내기 링크 — 화면이 이미 해석한 필터(since/until 포함)를 그대로 넘겨
+  // 표에 보이는 모집단과 파일 내용이 어긋나지 않게 한다(페이징만 없음).
+  const exportParams = new URLSearchParams();
+  exportParams.set("since", since);
+  if (until) exportParams.set("until", until);
+  if (route) exportParams.set("route", route);
+  if (hallucinationOnly) exportParams.set("halluc", "1");
+  if (negativeOnly) exportParams.set("neg", "1");
+  if (ip) exportParams.set("ip", ip);
+  if (search) exportParams.set("search", search);
+  if (sort) exportParams.set("sort", sort);
+  if (sortDir) exportParams.set("dir", sortDir);
+  const exportHref = `/api/admin/logs/export?${exportParams.toString()}`;
 
   const [stats, rows, detail] = await Promise.all([
     queryLogStats(filter),
@@ -531,6 +546,18 @@ export default async function AdminPage({
               }}
             />
           </div>
+
+          {/* ⑤ 엑셀 다운로드 — 현재 필터 전 범위(.xlsx). 멀티턴 대화는 행마다 대화
+              회차·대화 질의수가 함께 담긴다. 서버 라우트가 파일을 직접 내려주므로
+              단순 링크로 충분(클라이언트 JS 불필요). */}
+          <a
+            href={exportHref}
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-muted-foreground shadow-xs transition hover:bg-muted"
+            title="현재 필터 기준 전체 로그를 엑셀(.xlsx)로 내려받습니다 — 멀티턴 대화는 대화 회차 포함"
+          >
+            <Download className="h-3.5 w-3.5" aria-hidden />
+            엑셀 다운로드
+          </a>
 
           {ip && (
             <Link

@@ -191,6 +191,56 @@ export async function listQueryLogs(
   return (data ?? []) as unknown as QueryLogListItem[];
 }
 
+// ── 엑셀 내보내기 ───────────────────────────────────────────────────────────
+// 표 목록과 같은 필터·정렬을 쓰되 페이징 없이 전 범위를 청크로 끌어온다. 대화 회차
+// 계산에 session_id·message_count 가, 내용 확인에 answer 전문이 필요해 컬럼을 더한다.
+
+/** 내보내기 한 행(요약 + 대화 식별자 + 질문/답변 전문). */
+export type QueryLogExportItem = QueryLogListItem & {
+  session_id: string | null;
+  answer: string | null;
+  citation_count: number | null;
+  citation_verified_count: number | null;
+  error_code: string | null;
+};
+
+const EXPORT_COLUMNS = `${LIST_COLUMNS}, session_id, answer, citation_count, citation_verified_count, error_code`;
+
+// 내보내기 안전핀 — 1,000행 청크 × 50회. 도달 시 truncated 로 알린다(무표시 잘림 금지).
+const EXPORT_CHUNK = 1000;
+export const EXPORT_MAX_ROWS = 50_000;
+
+/** 필터 범위 전체를 내보내기용으로 조회한다(페이징 없음, 상한 EXPORT_MAX_ROWS). */
+export async function listQueryLogsForExport(
+  filter: QueryLogFilter = {},
+): Promise<{ rows: QueryLogExportItem[]; truncated: boolean }> {
+  const sortCol = SORT_COLUMN[filter.sort ?? "created_at"];
+  const ascending = filter.sortDir === "asc";
+  const rows: QueryLogExportItem[] = [];
+  let truncated = false;
+
+  const maxChunks = EXPORT_MAX_ROWS / EXPORT_CHUNK;
+  for (let chunk = 0; chunk < maxChunks; chunk++) {
+    let q = getSupabaseAdmin()
+      .from("query_log")
+      .select(EXPORT_COLUMNS)
+      .order(sortCol, { ascending })
+      // 동률 행에서 청크 경계가 흔들리지 않도록 id 를 2차 정렬키로 고정(stats 와 동일).
+      .order("id", { ascending: false })
+      .range(chunk * EXPORT_CHUNK, (chunk + 1) * EXPORT_CHUNK - 1);
+    q = applyFilter(q, filter);
+
+    const { data, error } = await q;
+    if (error) throw new Error(`[query-log] export failed: ${error.message}`);
+    const page = (data ?? []) as unknown as QueryLogExportItem[];
+    rows.push(...page);
+    if (page.length < EXPORT_CHUNK) break;
+    if (chunk === maxChunks - 1) truncated = true;
+  }
+
+  return { rows, truncated };
+}
+
 /** 단건 상세(전문 포함). 없으면 null. */
 export async function getQueryLog(id: number): Promise<QueryLogDetail | null> {
   const { data, error } = await getSupabaseAdmin()

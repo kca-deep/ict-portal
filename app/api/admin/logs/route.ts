@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminCookieName, adminSessionSecret, verifySession } from "@/lib/admin-auth";
-import { listQueryLogs, type QueryLogFilter, type SortKey } from "@/lib/db/query-log";
+import { listQueryLogs, type QueryLogFilter } from "@/lib/db/query-log";
+import { parseLogFilter } from "@/lib/admin/log-filter";
 
 // 대시보드 로그 표 페이징 API. offset/limit 로 한 페이지를 반환한다(페이지 크기는
 // 화이트리스트 20~300). 미들웨어 matcher 는 /api/admin/* 을 게이트하지 않으므로
@@ -22,37 +23,9 @@ export async function GET(req: NextRequest) {
   const offset = Math.max(0, Math.trunc(Number(sp.get("offset")) || 0));
   const limParam = Math.trunc(Number(sp.get("limit")));
   const limit = ALLOWED_LIMITS.includes(limParam) ? limParam : 10;
-  const routeParam = sp.get("route");
-  const route =
-    routeParam === "unified" ||
-    routeParam === "regulation" ||
-    routeParam === "law" ||
-    routeParam === "out_of_scope"
-      ? routeParam
-      : undefined;
 
-  const sortParam = sp.get("sort");
-  const sort: SortKey | undefined = (
-    ["created_at", "top_score", "total_ms", "tokens", "feedback"] as const
-  ).includes(sortParam as SortKey)
-    ? (sortParam as SortKey)
-    : undefined;
-  const dirParam = sp.get("dir");
-  const sortDir = dirParam === "asc" ? "asc" : dirParam === "desc" ? "desc" : undefined;
-
-  const filter: QueryLogFilter = {
-    limit,
-    offset,
-    route,
-    hallucinationOnly: sp.get("halluc") === "1",
-    negativeOnly: sp.get("neg") === "1",
-    ip: sp.get("ip") ?? undefined,
-    since: sp.get("since") ?? undefined,
-    until: sp.get("until") ?? undefined,
-    search: sp.get("search") ?? undefined,
-    sort,
-    sortDir,
-  };
+  // 모집단 필터는 엑셀 내보내기와 공유(lib/admin/log-filter), 페이징만 여기서 얹는다.
+  const filter: QueryLogFilter = { ...parseLogFilter(sp), limit, offset };
 
   try {
     const rows = await listQueryLogs(filter);
