@@ -28,7 +28,7 @@ import {
   type CitationVerdict,
   type CitationCheck,
 } from "@/lib/law/verify";
-import { checkBotId } from "botid/server";
+import { safeCheckBotId } from "@/lib/security/botid";
 import { env } from "@/lib/env";
 import { checkRateLimit } from "@/lib/security/ratelimit";
 import { checkCostBudget, recordTokens } from "@/lib/security/cost-guard";
@@ -223,11 +223,11 @@ function isValidMessages(value: unknown): value is ChatMessage[] {
 }
 
 export async function POST(req: NextRequest) {
-  // 봇 차단(Vercel BotID) — 자동화 트래픽을 처리·과금 전에 거른다. 로컬/미배포
-  // 환경에서는 SDK 가 통과로 동작한다. 클라이언트 신호는 layout 의 <BotIdClient> 가 수집.
-  // BOTID_ENFORCEMENT=off 면 판정을 로그로만 남기고 차단하지 않는다(관찰 모드) —
-  // 2026-07 실사용자 오탐(실브라우저 403) 조사용. 뒤의 레이트리밋·비용가드는 그대로 작동.
-  const bot = await checkBotId();
+  // 봇 차단(Vercel BotID) — 자동화 트래픽을 처리·과금 전에 거른다. 클라이언트 신호는
+  // layout 의 <BotIdClient> 가 수집. BOTID_ENFORCEMENT=off 면 판정을 로그로만 남기고
+  // 차단하지 않는다(관찰 모드) — 2026-07 실사용자 오탐(실브라우저 403) 조사용.
+  // 뒤의 레이트리밋·비용가드는 그대로 작동.
+  const bot = await safeCheckBotId("chat");
   if (bot.isBot) {
     console.warn("[chat] botid flagged:", JSON.stringify(bot));
     if (process.env.BOTID_ENFORCEMENT !== "off") {
