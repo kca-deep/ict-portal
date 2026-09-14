@@ -316,7 +316,6 @@ export type ApiUsageStats = {
   embedCalls: number; // OpenAI 임베딩 호출 수
   embedTokens: number;
   cohereCalls: number; // Cohere 재정렬 호출 수
-  cohereUnits: number; // Cohere 과금 단위(search units)
   lawCalls: number; // 법제처 DRF 호출 수
 };
 
@@ -440,7 +439,6 @@ export async function queryLogStats(
     embedCalls: 0,
     embedTokens: 0,
     cohereCalls: 0,
-    cohereUnits: 0,
     lawCalls: 0,
   };
 
@@ -497,7 +495,6 @@ export async function queryLogStats(
       api.embedCalls += u.openai_embed_calls ?? 0;
       api.embedTokens += u.openai_embed_tokens ?? 0;
       api.cohereCalls += u.cohere_calls ?? 0;
-      api.cohereUnits += u.cohere_search_units ?? 0;
       api.lawCalls += u.law_api_calls ?? 0;
     }
   }

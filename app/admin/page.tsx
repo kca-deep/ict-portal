@@ -406,7 +406,8 @@ export default async function AdminPage({
           </div>
 
           {/* API 사용량 스트립: 제공자 기준 4칸(비중 순: Claude 답변·보조 → 법제처 → Cohere
-              재정렬 → OpenAI 임베딩). 청구서 단위와 1:1 로 맞춰 비용 추적이 직관적이도록.
+              재정렬 → OpenAI 임베딩). Cohere 는 과금 unit 이 아닌 재정렬 호출 횟수로 표기
+              (unit 은 풀 크기·조문 길이에 따라 호출당 1~11로 흔들려 질의 수와 대조가 어렵다).
               Claude 는 tokens_in/out(답변)+api_usage(보조) 합, 나머지는 api_usage jsonb
               (계측 도입 후 행만). */}
           <div className="grid grid-cols-2 border-t border-border bg-muted/40 sm:grid-cols-4">
@@ -426,8 +427,8 @@ export default async function AdminPage({
             />
             <Kpi
               label="Cohere API"
-              value={`${fmtCount(stats.api.cohereUnits)} unit`}
-              note={`재정렬 · ${stats.api.cohereCalls.toLocaleString()}회`}
+              value={`${fmtCount(stats.api.cohereCalls)}회`}
+              note="재정렬 횟수"
             />
             <Kpi
               label="OpenAI API"
