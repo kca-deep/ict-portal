@@ -176,6 +176,8 @@ export function LogTable({
   const [error, setError] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null); // 상세 팝업 대상
   const closeDetail = useCallback(() => setSelectedId(null), []);
+  // 팝업에서 페이지 경계를 넘어 이전/다음으로 갈 때, 새 페이지 행을 받은 뒤 고를 위치.
+  const pendingEdge = useRef<"first" | "last" | null>(null);
 
   const holidaySet = useMemo(() => new Set(holidays), [holidays]);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -210,11 +212,20 @@ export function LogTable({
         const res = await fetch(`/api/admin/logs?${p.toString()}`);
         if (!res.ok) throw new Error(String(res.status));
         const data = (await res.json()) as { rows: QueryLogListItem[] };
-        if (!cancelled) setRows(data.rows);
+        if (!cancelled) {
+          setRows(data.rows);
+          if (pendingEdge.current && data.rows.length > 0) {
+            const edge = pendingEdge.current === "first" ? data.rows[0] : data.rows[data.rows.length - 1];
+            setSelectedId(edge.id);
+          }
+        }
       } catch {
         if (!cancelled) setError(true);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          pendingEdge.current = null;
+        }
       }
     })();
     return () => {
@@ -223,6 +234,26 @@ export function LogTable({
     // sp/since/until/pageSize 는 remount 로 고정이므로 deps 에서 제외(page 만 관찰).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
+
+  // 상세 팝업의 이전/다음 — 표 순서(현재 정렬) 그대로. 페이지 끝이면 이웃 페이지를 불러온 뒤
+  // 그 페이지의 마지막/첫 행을 고른다(pendingEdge). 페이지를 불러오는 중엔 잠근다.
+  const selectedIndex = selectedId == null ? -1 : rows.findIndex((r) => r.id === selectedId);
+  const absIndex = selectedIndex < 0 ? -1 : offset + selectedIndex;
+  const canStep = selectedIndex >= 0 && !loading;
+  const goPrev = useCallback(() => {
+    if (selectedIndex > 0) setSelectedId(rows[selectedIndex - 1].id);
+    else {
+      pendingEdge.current = "last";
+      setPage((p) => p - 1);
+    }
+  }, [rows, selectedIndex]);
+  const goNext = useCallback(() => {
+    if (selectedIndex < rows.length - 1) setSelectedId(rows[selectedIndex + 1].id);
+    else {
+      pendingEdge.current = "first";
+      setPage((p) => p + 1);
+    }
+  }, [rows, selectedIndex]);
 
   const rangeText =
     total === 0
@@ -359,7 +390,16 @@ export function LogTable({
         </div>
       </div>
 
-      {selectedId != null && <LogDetailDialog key={selectedId} id={selectedId} onClose={closeDetail} />}
+      {selectedId != null && (
+        <LogDetailDialog
+          id={selectedId}
+          position={absIndex >= 0 ? absIndex + 1 : null}
+          total={total}
+          onClose={closeDetail}
+          onPrev={canStep && absIndex > 0 ? goPrev : null}
+          onNext={canStep && absIndex < total - 1 ? goNext : null}
+        />
+      )}
     </>
   );
 }
@@ -396,23 +436,47 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-// 로그 상세 모달. Esc·바깥 클릭·닫기 버튼으로 닫고, 열려 있는 동안 배경 스크롤을 잠근다.
-function LogDetailDialog({ id, onClose }: { id: number; onClose: () => void }) {
-  const [detail, setDetail] = useState<QueryLogDetail | null>(null);
-  const [error, setError] = useState(false);
+// 로그 상세 모달. Esc·바깥 클릭·닫기 버튼으로 닫고, 이전/다음 버튼·←/→ 키로 표 순서대로
+// 넘긴다(onPrev/onNext 가 null 이면 끝). 열려 있는 동안 배경 스크롤을 잠근다.
+function LogDetailDialog({
+  id,
+  position,
+  total,
+  onClose,
+  onPrev,
+  onNext,
+}: {
+  id: number;
+  position: number | null; // 필터 결과 전체에서의 순번(1-based). 표에서 못 찾으면 null
+  total: number;
+  onClose: () => void;
+  onPrev: (() => void) | null;
+  onNext: (() => void) | null;
+}) {
+  // 받은 상세를 id 와 함께 보관 — 넘기는 동안 새 상세가 올 때까지 직전 내용을 흐리게
+  // 유지해 깜빡임을 없앤다. detail=null 은 조회 실패.
+  const [loaded, setLoaded] = useState<{ id: number; detail: QueryLogDetail | null } | null>(null);
+  const cache = useRef(new Map<number, QueryLogDetail>());
   const closeRef = useRef<HTMLButtonElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const loading = loaded?.id !== id;
 
   useEffect(() => {
-    // 대상이 바뀌면 부모가 key 로 remount 하므로 상태 초기화는 필요 없다.
     let cancelled = false;
     (async () => {
+      const hit = cache.current.get(id);
+      if (hit) {
+        setLoaded({ id, detail: hit });
+        return;
+      }
       try {
         const res = await fetch(`/api/admin/logs/${id}`);
         if (!res.ok) throw new Error(String(res.status));
         const data = (await res.json()) as { detail: QueryLogDetail };
-        if (!cancelled) setDetail(data.detail);
+        cache.current.set(id, data.detail);
+        if (!cancelled) setLoaded({ id, detail: data.detail });
       } catch {
-        if (!cancelled) setError(true);
+        if (!cancelled) setLoaded({ id, detail: null });
       }
     })();
     return () => {
@@ -420,19 +484,33 @@ function LogDetailDialog({ id, onClose }: { id: number; onClose: () => void }) {
     };
   }, [id]);
 
+  // 새 상세로 바뀌면 본문 스크롤을 맨 위로.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
+    bodyRef.current?.scrollTo({ top: 0 });
+  }, [loaded?.id]);
+
+  useEffect(() => {
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     closeRef.current?.focus();
     return () => {
-      window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
     };
-  }, [onClose]);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft" && onPrev) onPrev();
+      else if (e.key === "ArrowRight" && onNext) onNext();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, onPrev, onNext]);
+
+  const shown = loaded?.detail ?? null;
+  const stepBtn =
+    "rounded-md border border-border bg-card px-2.5 py-1 text-[13px] text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40";
 
   return (
     <div
@@ -446,30 +524,43 @@ function LogDetailDialog({ id, onClose }: { id: number; onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
         className="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl"
       >
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-6 py-4">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-3.5">
           <h2 className="font-mono text-sm font-semibold text-foreground">
             #{id}
-            {detail && (
-              <span className="ml-2 font-sans font-normal text-muted-foreground">{fmtTime(detail.created_at)}</span>
+            {!loading && shown && (
+              <span className="ml-2 font-sans font-normal text-muted-foreground">{fmtTime(shown.created_at)}</span>
             )}
           </h2>
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={onClose}
-            className="rounded-md px-1.5 text-sm text-muted-foreground transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            닫기 ✕
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button type="button" onClick={onPrev ?? undefined} disabled={!onPrev} className={stepBtn} title="이전 질의 (←)">
+              ‹ 이전
+            </button>
+            <span className="min-w-[4.5rem] px-1 text-center text-xs tabular-nums text-muted-foreground">
+              {position != null ? `${position.toLocaleString()} / ${total.toLocaleString()}` : "–"}
+            </span>
+            <button type="button" onClick={onNext ?? undefined} disabled={!onNext} className={stepBtn} title="다음 질의 (→)">
+              다음 ›
+            </button>
+            <button
+              ref={closeRef}
+              type="button"
+              onClick={onClose}
+              className="ml-2 rounded-md px-1.5 text-sm text-muted-foreground transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              닫기 ✕
+            </button>
+          </div>
         </div>
 
-        <div className="min-h-0 overflow-y-auto px-6 py-5">
-          {error ? (
-            <p className="py-10 text-center text-sm text-destructive">상세를 불러오지 못했습니다.</p>
-          ) : !detail ? (
+        <div ref={bodyRef} className="min-h-0 overflow-y-auto px-6 py-5">
+          {!shown && loading ? (
             <p className="py-10 text-center text-sm text-muted-foreground">불러오는 중…</p>
+          ) : !shown ? (
+            <p className="py-10 text-center text-sm text-destructive">상세를 불러오지 못했습니다.</p>
           ) : (
-            <LogDetailBody detail={detail} />
+            <div className={`transition-opacity ${loading ? "opacity-40" : ""}`}>
+              <LogDetailBody detail={shown} />
+            </div>
           )}
         </div>
       </div>
