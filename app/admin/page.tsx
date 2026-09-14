@@ -439,7 +439,7 @@ export default async function AdminPage({
 
         {/* 필터 행 — 요소별 아웃라인 그룹(shadcn outline: border+rounded-lg+shadow-xs)을
             1열로 촘촘히(gap-2) 배열. 그룹: ①검색·기간 ②분기 세그먼트 ③품질 토글
-            ④페이지당 콤보 (+조건부 IP 칩). 세그먼트 내부는 divide-x 로 등간격. */}
+            ④페이지당 콤보+엑셀 다운로드 (+조건부 IP 칩). 세그먼트 내부는 divide-x 로 등간격. */}
         <section className="mt-6 flex flex-wrap items-stretch gap-2 text-[13px]">
           {/* ① 검색·기간 */}
           <form
@@ -460,7 +460,7 @@ export default async function AdminPage({
               name="q"
               defaultValue={search ?? ""}
               placeholder="질문·답변 검색"
-              className="w-52 bg-transparent px-3 py-1.5 outline-none placeholder:text-muted-foreground/70"
+              className="w-44 bg-transparent px-3 py-1.5 outline-none placeholder:text-muted-foreground/70"
             />
             <input
               type="date"
@@ -524,9 +524,9 @@ export default async function AdminPage({
             </Link>
           </div>
 
-          {/* ④ 페이지당 콤보 */}
-          <div className="flex items-center overflow-hidden rounded-lg border border-border bg-card shadow-xs">
-            <span className="border-r border-border px-2.5 py-1.5 text-xs text-muted-foreground/70">
+          {/* ④ 페이지당 콤보 + 엑셀 다운로드 — 한 그룹으로 붙여 필터 행이 1줄에 들어가게 한다 */}
+          <div className="flex items-stretch overflow-hidden rounded-lg border border-border bg-card shadow-xs">
+            <span className="flex items-center border-r border-border px-2.5 py-1.5 text-xs text-muted-foreground/70">
               페이지당
             </span>
             <PageSizeSelect
@@ -545,19 +545,17 @@ export default async function AdminPage({
                 dir: sortDir,
               }}
             />
+            {/* 엑셀 다운로드 — 현재 필터 전 범위(.xlsx). 행마다 대화 질의수(대화 전체
+                기준)가 담긴다. 서버 라우트가 파일을 직접 내려주므로 단순 링크로 충분. */}
+            <a
+              href={exportHref}
+              className="flex items-center gap-1.5 border-l border-border px-3 py-1.5 text-muted-foreground transition hover:bg-muted"
+              title="현재 필터 기준 전체 로그를 엑셀(.xlsx)로 내려받습니다 — 대화별 질의수 포함"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />
+              엑셀 다운로드
+            </a>
           </div>
-
-          {/* ⑤ 엑셀 다운로드 — 현재 필터 전 범위(.xlsx). 멀티턴 대화는 행마다 대화
-              회차·대화 질의수가 함께 담긴다. 서버 라우트가 파일을 직접 내려주므로
-              단순 링크로 충분(클라이언트 JS 불필요). */}
-          <a
-            href={exportHref}
-            className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-muted-foreground shadow-xs transition hover:bg-muted"
-            title="현재 필터 기준 전체 로그를 엑셀(.xlsx)로 내려받습니다 — 멀티턴 대화는 대화 회차 포함"
-          >
-            <Download className="h-3.5 w-3.5" aria-hidden />
-            엑셀 다운로드
-          </a>
 
           {ip && (
             <Link
