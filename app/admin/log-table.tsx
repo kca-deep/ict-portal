@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import type { QueryLogListItem } from "@/lib/db/query-log";
+import type { QueryLogDetail, QueryLogListItem } from "@/lib/db/query-log";
+import { Response } from "@/components/ui/response";
 
 // query_log 표(클라이언트). 초기 한 페이지는 서버가 렌더해 넘기고(크기는 ?ps= 콤보 —
 // 필터 행의 PageSizeSelect 가 관리), 페이지 이동 시 /api/admin/logs 에서 해당 구간을
 // offset/limit 로 받아 교체한다. service_role 은 서버에만 있으므로 넘어오는 건 요약 행뿐.
+// 질문을 누르면 /api/admin/logs/{id} 에서 전문을 받아 팝업으로 연다(페이지 이동 없음 —
+// 대시보드 재렌더·스크롤 점프 없이 표 상태·페이지를 그대로 유지).
 
 type Sp = {
   base: string; // 관리자 링크 베이스 — "/admin" 또는 슬러그 모드의 "/{slug}"
@@ -140,7 +143,7 @@ function SortTh({
   return (
     <th className={`px-4 py-2.5 font-medium ${align === "right" ? "text-right" : "text-left"} ${w ?? ""}`}>
       <Link
-        href={href(sp, { sort: col, dir: nextDir, log: undefined })}
+        href={href(sp, { sort: col, dir: nextDir })}
         className={`transition hover:text-foreground ${active ? "text-foreground" : ""}`}
       >
         {label}
@@ -158,7 +161,6 @@ export function LogTable({
   sp,
   since,
   until,
-  selectedId,
 }: {
   initialRows: QueryLogListItem[];
   total: number;
@@ -167,12 +169,13 @@ export function LogTable({
   sp: Sp;
   since?: string;
   until?: string;
-  selectedId?: number;
 }) {
   const [rows, setRows] = useState<QueryLogListItem[]>(initialRows);
   const [page, setPage] = useState(0); // 0-indexed
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [selectedId, setSelectedId] = useState<number | null>(null); // 상세 팝업 대상
+  const closeDetail = useCallback(() => setSelectedId(null), []);
 
   const holidaySet = useMemo(() => new Set(holidays), [holidays]);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -271,7 +274,7 @@ export function LogTable({
                   </td>
                   <td className="truncate whitespace-nowrap px-4 py-2.5 font-mono text-xs text-muted-foreground">
                     {r.ip ? (
-                      <Link href={href(sp, { ip: r.ip, log: undefined })} className="hover:text-primary hover:underline">
+                      <Link href={href(sp, { ip: r.ip })} className="hover:text-primary hover:underline">
                         {r.ip}
                       </Link>
                     ) : (
@@ -279,12 +282,13 @@ export function LogTable({
                     )}
                   </td>
                   <td className="px-4 py-2.5">
-                    <Link
-                      href={href(sp, { log: String(r.id) })}
-                      className="block truncate text-foreground hover:text-primary hover:underline"
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(r.id)}
+                      className="block w-full truncate text-left text-foreground hover:text-primary hover:underline"
                     >
                       {r.query}
-                    </Link>
+                    </button>
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5">
                     {r.route ? <RoutePill route={r.route} /> : <span className="text-muted-foreground">–</span>}
@@ -352,6 +356,223 @@ export function LogTable({
               다음 ›
             </button>
           </div>
+        </div>
+      </div>
+
+      {selectedId != null && <LogDetailDialog key={selectedId} id={selectedId} onClose={closeDetail} />}
+    </>
+  );
+}
+
+// ── 상세 팝업 ────────────────────────────────────────────────────────────────
+function fmtScore(v: number | null) {
+  return v == null ? "–" : v.toFixed(3);
+}
+
+// 상세 메타 한 항목 — 라벨·값을 한 줄 칩으로(상단 압축 스트립용).
+function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-baseline gap-1.5">
+      <span className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground/80">
+        {label}
+      </span>
+      <span className="text-[12.5px] tabular-nums text-foreground">{children}</span>
+    </span>
+  );
+}
+
+function Json({ value }: { value: unknown }) {
+  if (value == null) return <span className="text-muted-foreground/50">–</span>;
+  return (
+    <pre className="mt-1 max-h-48 overflow-auto rounded-md border border-border bg-muted/60 p-2.5 font-mono text-[11.5px] leading-relaxed text-foreground/80">
+      {JSON.stringify(value, null, 2)}
+    </pre>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{children}</div>
+  );
+}
+
+// 로그 상세 모달. Esc·바깥 클릭·닫기 버튼으로 닫고, 열려 있는 동안 배경 스크롤을 잠근다.
+function LogDetailDialog({ id, onClose }: { id: number; onClose: () => void }) {
+  const [detail, setDetail] = useState<QueryLogDetail | null>(null);
+  const [error, setError] = useState(false);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    // 대상이 바뀌면 부모가 key 로 remount 하므로 상태 초기화는 필요 없다.
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/admin/logs/${id}`);
+        if (!res.ok) throw new Error(String(res.status));
+        const data = (await res.json()) as { detail: QueryLogDetail };
+        if (!cancelled) setDetail(data.detail);
+      } catch {
+        if (!cancelled) setError(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 sm:p-8"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`로그 #${id} 상세`}
+        onClick={(e) => e.stopPropagation()}
+        className="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl"
+      >
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-6 py-4">
+          <h2 className="font-mono text-sm font-semibold text-foreground">
+            #{id}
+            {detail && (
+              <span className="ml-2 font-sans font-normal text-muted-foreground">{fmtTime(detail.created_at)}</span>
+            )}
+          </h2>
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={onClose}
+            className="rounded-md px-1.5 text-sm text-muted-foreground transition hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            닫기 ✕
+          </button>
+        </div>
+
+        <div className="min-h-0 overflow-y-auto px-6 py-5">
+          {error ? (
+            <p className="py-10 text-center text-sm text-destructive">상세를 불러오지 못했습니다.</p>
+          ) : !detail ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">불러오는 중…</p>
+          ) : (
+            <LogDetailBody detail={detail} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LogDetailBody({ detail }: { detail: QueryLogDetail }) {
+  return (
+    <>
+      {/* 메타 스트립 — 칩형 한두 줄로 압축. 질의·응답 본문이 팝업의 주인공이 되도록 상단에 붙인다. */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-border/60 pb-4">
+        <MetaItem label="IP">
+          <span className="font-mono text-[12px]">{detail.ip ?? "–"}</span>
+        </MetaItem>
+        <MetaItem label="분기">{detail.route ? <RoutePill route={detail.route} /> : "–"}</MetaItem>
+        <MetaItem label="관련도">{fmtScore(detail.top_score)}</MetaItem>
+        <MetaItem label="환각">
+          {detail.has_hallucination ? <span className="font-semibold text-destructive">예</span> : "아니오"}
+        </MetaItem>
+        <MetaItem label="모델">{detail.llm_model ?? "–"}</MetaItem>
+        <MetaItem label="인용">
+          {(detail.citation_verified_count ?? 0)}/{detail.citation_count ?? 0} 검증
+        </MetaItem>
+        <MetaItem label="지연 검색·재정렬·LLM">
+          {fmtDur(detail.retrieval_ms)} · {fmtDur(detail.rerank_ms)} · {fmtDur(detail.llm_ms)}
+        </MetaItem>
+        <MetaItem label="첫토큰·총">
+          {fmtDur(detail.ttft_ms)} · {fmtDur(detail.total_ms)}
+        </MetaItem>
+        <MetaItem label="토큰 in/out">
+          {(detail.tokens_in ?? 0).toLocaleString()}/{(detail.tokens_out ?? 0).toLocaleString()}
+        </MetaItem>
+        <MetaItem label="게이트">
+          {detail.gate_sufficient == null ? "–" : detail.gate_sufficient ? "충족" : "미충족"}
+        </MetaItem>
+        <MetaItem label="피드백">
+          {detail.feedback === 1 ? (
+            <span className="font-semibold text-primary">도움됨</span>
+          ) : detail.feedback === -1 ? (
+            <span className="font-semibold text-destructive">아쉬움</span>
+          ) : (
+            "–"
+          )}
+        </MetaItem>
+        {detail.error_code && (
+          <MetaItem label="오류">
+            <span className="font-mono text-destructive">{detail.error_code}</span>
+          </MetaItem>
+        )}
+      </div>
+
+      <div className="mt-4 space-y-4">
+        <div>
+          <SectionLabel>질문</SectionLabel>
+          <p className="mt-1 whitespace-pre-wrap text-[13.5px] leading-relaxed text-foreground">{detail.query}</p>
+        </div>
+        <div>
+          <SectionLabel>답변</SectionLabel>
+          {/* 답변은 LLM 마크다운 원문 — 챗 UI 와 동일한 Response(Streamdown) 뷰어로 렌더.
+              질문은 사용자 평문이라 pre-wrap 유지(마크다운 해석 시 줄바꿈이 뭉개짐). */}
+          {detail.answer ? (
+            <div className="mt-1 text-[13.5px] leading-relaxed text-foreground/90">
+              <Response>{detail.answer}</Response>
+            </div>
+          ) : (
+            <p className="mt-1 text-[13.5px] text-muted-foreground">–</p>
+          )}
+        </div>
+        {detail.feedback_note && (
+          <div>
+            <SectionLabel>피드백 메모</SectionLabel>
+            <p className="mt-1 whitespace-pre-wrap text-[13.5px] leading-relaxed text-foreground/90">
+              {detail.feedback_note}
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <div>
+          <SectionLabel>인용 검증 (cited_law_refs)</SectionLabel>
+          <Json value={detail.cited_law_refs} />
+        </div>
+        <div>
+          <SectionLabel>법령 참조 (law_refs)</SectionLabel>
+          <Json value={detail.law_refs} />
+        </div>
+        <div>
+          <SectionLabel>의도 분해 (intents)</SectionLabel>
+          <Json value={detail.intents} />
+        </div>
+        <div>
+          <SectionLabel>근거 문서 (retrieved)</SectionLabel>
+          <Json value={detail.retrieved} />
+        </div>
+        <div>
+          <SectionLabel>문서 id (retrieved_doc_ids)</SectionLabel>
+          <Json value={detail.retrieved_doc_ids} />
+        </div>
+        <div>
+          <SectionLabel>API 사용량 (api_usage)</SectionLabel>
+          <Json value={detail.api_usage} />
         </div>
       </div>
     </>

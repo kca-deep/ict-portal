@@ -3,13 +3,11 @@ import { Download } from "lucide-react";
 import {
   listQueryLogs,
   queryLogStats,
-  getQueryLog,
   type QueryLogFilter,
   type QueryLogStats,
 } from "@/lib/db/query-log";
 import { UsageChart, RouteDonut } from "./charts";
 import { LogoutButton } from "./logout-button";
-import { Response } from "@/components/ui/response";
 import { LogTable } from "./log-table";
 import { PageSizeSelect } from "./page-size-select";
 import { getKoreanHolidaysForYears } from "@/lib/holidays";
@@ -75,7 +73,6 @@ function href(sp: SearchParams, patch: Record<string, string | undefined>): stri
     sort: first(sp.sort),
     dir: first(sp.dir),
     ps: first(sp.ps),
-    log: first(sp.log),
     ...patch,
   };
   const params = new URLSearchParams();
@@ -86,12 +83,6 @@ function href(sp: SearchParams, patch: Record<string, string | undefined>): stri
 function fmtDur(ms: number | null): string {
   if (ms == null) return "–";
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
-}
-function fmtScore(v: number | null): string {
-  return v == null ? "–" : v.toFixed(3);
-}
-function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleString("ko-KR", { hour12: false });
 }
 function pctNum(n: number, total: number): number {
   return total ? (n / total) * 100 : 0;
@@ -104,9 +95,6 @@ function fmtCount(n: number): string {
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 1e4) return `${Math.round(n / 1e3)}k`;
   return n.toLocaleString();
-}
-function tint(color: string, amount = 14): string {
-  return `color-mix(in oklch, ${color} ${amount}%, transparent)`;
 }
 
 // ── 페이지 ──────────────────────────────────────────────────────────────────
@@ -127,7 +115,6 @@ export default async function AdminPage({
       : undefined;
   const hallucinationOnly = first(sp.halluc) === "1";
   const ip = first(sp.ip);
-  const selectedId = first(sp.log) ? Number(first(sp.log)) : undefined;
 
   const search = first(sp.q);
   const from = first(sp.from); // YYYY-MM-DD
@@ -184,13 +171,7 @@ export default async function AdminPage({
   if (sortDir) exportParams.set("dir", sortDir);
   const exportHref = `/api/admin/logs/export?${exportParams.toString()}`;
 
-  const [stats, rows, detail] = await Promise.all([
-    queryLogStats(filter),
-    listQueryLogs(filter),
-    selectedId != null && Number.isFinite(selectedId)
-      ? getQueryLog(selectedId)
-      : Promise.resolve(null),
-  ]);
+  const [stats, rows] = await Promise.all([queryLogStats(filter), listQueryLogs(filter)]);
 
   // 로그 표 "시간대" 배지(주말/휴일/심야)용 공휴일 날짜키. 현재 연도 ±1 + 초기 행의
   // 연도를 커버(페이징으로 더 불러오는 행도 대부분 이 범위). KST 연도 기준.
@@ -261,7 +242,7 @@ export default async function AdminPage({
                     return (
                       <Link
                         key={label}
-                        href={href(sp, { period: value, log: undefined })}
+                        href={href(sp, { period: value })}
                         className={`rounded-md px-2.5 py-1 transition ${
                           on ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
                         }`}
@@ -490,7 +471,7 @@ export default async function AdminPage({
               return (
                 <Link
                   key={label}
-                  href={href(sp, { route: value, log: undefined })}
+                  href={href(sp, { route: value })}
                   className={`flex items-center px-3 py-1.5 transition ${
                     on ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
                   }`}
@@ -504,7 +485,7 @@ export default async function AdminPage({
           {/* ③ 품질 토글 — 분기 세그먼트와 동일 등간격 */}
           <div className="flex items-stretch divide-x divide-border overflow-hidden rounded-lg border border-border bg-card shadow-xs">
             <Link
-              href={href(sp, { halluc: hallucinationOnly ? undefined : "1", log: undefined })}
+              href={href(sp, { halluc: hallucinationOnly ? undefined : "1" })}
               className={`flex items-center px-3 py-1.5 transition ${
                 hallucinationOnly
                   ? "bg-destructive text-destructive-foreground"
@@ -514,7 +495,7 @@ export default async function AdminPage({
               환각만
             </Link>
             <Link
-              href={href(sp, { neg: negativeOnly ? undefined : "1", log: undefined })}
+              href={href(sp, { neg: negativeOnly ? undefined : "1" })}
               className={`flex items-center px-3 py-1.5 transition ${
                 negativeOnly
                   ? "bg-primary text-primary-foreground"
@@ -560,16 +541,13 @@ export default async function AdminPage({
 
           {ip && (
             <Link
-              href={href(sp, { ip: undefined, log: undefined })}
+              href={href(sp, { ip: undefined })}
               className="flex items-center rounded-lg border border-border bg-card px-3 py-1.5 font-mono text-muted-foreground shadow-xs transition hover:bg-muted"
             >
               IP={ip} ✕
             </Link>
           )}
         </section>
-
-        {/* 상세 */}
-        {detail && <DetailPanel sp={sp} detail={detail} />}
 
         {/* 로그 표 — 초기 한 페이지(ps 크기)는 서버 렌더, 페이지 이동은 SPA 페치 */}
         <LogTable
@@ -596,7 +574,6 @@ export default async function AdminPage({
           }}
           since={filter.since}
           until={filter.until}
-          selectedId={selectedId}
         />
       </div>
     </main>
@@ -743,171 +720,5 @@ function Kpi({
         )}
       </div>
     </div>
-  );
-}
-
-function RoutePill({ route }: { route: "unified" | "regulation" | "law" | "out_of_scope" }) {
-  const m = ROUTE_META[route];
-  return (
-    <span
-      className="inline-block rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold"
-      style={{ color: m.color, background: tint(m.color) }}
-    >
-      {m.label}
-    </span>
-  );
-}
-
-// 상세 메타 한 항목 — 라벨·값을 한 줄 칩으로(상단 압축 스트립용).
-function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-baseline gap-1.5">
-      <span className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground/80">
-        {label}
-      </span>
-      <span className="text-[12.5px] tabular-nums text-foreground">{children}</span>
-    </span>
-  );
-}
-
-function Json({ value }: { value: unknown }) {
-  if (value == null) return <span className="text-muted-foreground/50">–</span>;
-  return (
-    <pre className="mt-1 max-h-48 overflow-auto rounded-md border border-border bg-muted/60 p-2.5 font-mono text-[11.5px] leading-relaxed text-foreground/80">
-      {JSON.stringify(value, null, 2)}
-    </pre>
-  );
-}
-
-function DetailPanel({
-  sp,
-  detail,
-}: {
-  sp: SearchParams;
-  detail: NonNullable<Awaited<ReturnType<typeof getQueryLog>>>;
-}) {
-  return (
-    <section className="mt-6 rounded-xl border border-border bg-accent/60 p-6 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <h2 className="font-mono text-sm font-semibold text-foreground">
-          #{detail.id}
-          <span className="ml-2 font-sans font-normal text-muted-foreground">{fmtTime(detail.created_at)}</span>
-        </h2>
-        <Link href={href(sp, { log: undefined })} className="text-sm text-muted-foreground transition hover:text-foreground">
-          닫기 ✕
-        </Link>
-      </div>
-
-      {/* 메타 스트립 — 헤더 바로 아래 칩형 한두 줄로 압축(구 2×4 그리드 대체).
-          질의·응답 본문이 패널의 주인공이 되도록 메타는 상단에 붙인다. */}
-      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-border/60 pb-4">
-        <MetaItem label="IP">
-          <span className="font-mono text-[12px]">{detail.ip ?? "–"}</span>
-        </MetaItem>
-        <MetaItem label="분기">{detail.route ? <RoutePill route={detail.route} /> : "–"}</MetaItem>
-        <MetaItem label="관련도">{fmtScore(detail.top_score)}</MetaItem>
-        <MetaItem label="환각">
-          {detail.has_hallucination ? <span className="font-semibold text-destructive">예</span> : "아니오"}
-        </MetaItem>
-        <MetaItem label="모델">{detail.llm_model ?? "–"}</MetaItem>
-        <MetaItem label="인용">
-          {(detail.citation_verified_count ?? 0)}/{detail.citation_count ?? 0} 검증
-        </MetaItem>
-        <MetaItem label="지연 검색·재정렬·LLM">
-          {fmtDur(detail.retrieval_ms)} · {fmtDur(detail.rerank_ms)} · {fmtDur(detail.llm_ms)}
-        </MetaItem>
-        <MetaItem label="첫토큰·총">
-          {fmtDur(detail.ttft_ms)} · {fmtDur(detail.total_ms)}
-        </MetaItem>
-        <MetaItem label="토큰 in/out">
-          {(detail.tokens_in ?? 0).toLocaleString()}/{(detail.tokens_out ?? 0).toLocaleString()}
-        </MetaItem>
-        <MetaItem label="게이트">
-          {detail.gate_sufficient == null ? "–" : detail.gate_sufficient ? "충족" : "미충족"}
-        </MetaItem>
-        <MetaItem label="피드백">
-          {detail.feedback === 1 ? (
-            <span className="font-semibold text-primary">도움됨</span>
-          ) : detail.feedback === -1 ? (
-            <span className="font-semibold text-destructive">아쉬움</span>
-          ) : (
-            "–"
-          )}
-        </MetaItem>
-        {detail.error_code && (
-          <MetaItem label="오류">
-            <span className="font-mono text-destructive">{detail.error_code}</span>
-          </MetaItem>
-        )}
-      </div>
-
-      <div className="mt-4 space-y-4">
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">질문</div>
-          <p className="mt-1 whitespace-pre-wrap text-[13.5px] leading-relaxed text-foreground">{detail.query}</p>
-        </div>
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">답변</div>
-          {/* 답변은 LLM 마크다운 원문 — 챗 UI 와 동일한 Response(Streamdown) 뷰어로 렌더.
-              질문은 사용자 평문이라 pre-wrap 유지(마크다운 해석 시 줄바꿈이 뭉개짐). */}
-          {detail.answer ? (
-            <div className="mt-1 text-[13.5px] leading-relaxed text-foreground/90">
-              <Response>{detail.answer}</Response>
-            </div>
-          ) : (
-            <p className="mt-1 text-[13.5px] text-muted-foreground">–</p>
-          )}
-        </div>
-        {detail.feedback_note && (
-          <div>
-            <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              피드백 메모
-            </div>
-            <p className="mt-1 whitespace-pre-wrap text-[13.5px] leading-relaxed text-foreground/90">
-              {detail.feedback_note}
-            </p>
-          </div>
-        )}
-      </div>
-
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            인용 검증 (cited_law_refs)
-          </div>
-          <Json value={detail.cited_law_refs} />
-        </div>
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            법령 참조 (law_refs)
-          </div>
-          <Json value={detail.law_refs} />
-        </div>
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            의도 분해 (intents)
-          </div>
-          <Json value={detail.intents} />
-        </div>
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            근거 문서 (retrieved)
-          </div>
-          <Json value={detail.retrieved} />
-        </div>
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            문서 id (retrieved_doc_ids)
-          </div>
-          <Json value={detail.retrieved_doc_ids} />
-        </div>
-        <div>
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            API 사용량 (api_usage)
-          </div>
-          <Json value={detail.api_usage} />
-        </div>
-      </div>
-    </section>
   );
 }
