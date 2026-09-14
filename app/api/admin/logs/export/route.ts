@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { adminCookieName, adminSessionSecret, verifySession } from "@/lib/admin-auth";
-import { listQueryLogsForExport } from "@/lib/db/query-log";
+import { countQueriesBySession, listQueryLogsForExport } from "@/lib/db/query-log";
 import { parseLogFilter } from "@/lib/admin/log-filter";
 import { buildQueryLogWorkbook } from "@/lib/admin/log-export";
 
@@ -33,7 +33,10 @@ export async function GET(req: NextRequest) {
 
   try {
     const { rows, truncated } = await listQueryLogsForExport(filter);
-    const buf = await buildQueryLogWorkbook(rows, filter, truncated);
+    const sessionQueries = await countQueriesBySession(
+      rows.flatMap((r) => (r.session_id ? [r.session_id] : [])),
+    );
+    const buf = await buildQueryLogWorkbook(rows, sessionQueries, filter, truncated);
     // 파일명이 한글이라 ASCII 폴백(filename)과 RFC 5987(filename*)을 함께 보낸다.
     const { name, ascii } = fileNames();
     return new NextResponse(new Uint8Array(buf), {

@@ -192,8 +192,8 @@ export async function listQueryLogs(
 }
 
 // ── 엑셀 내보내기 ───────────────────────────────────────────────────────────
-// 표 목록과 같은 필터·정렬을 쓰되 페이징 없이 전 범위를 청크로 끌어온다. 대화 회차
-// 계산에 session_id·message_count 가, 내용 확인에 answer 전문이 필요해 컬럼을 더한다.
+// 표 목록과 같은 필터·정렬을 쓰되 페이징 없이 전 범위를 청크로 끌어온다. 대화 질의수
+// 집계에 session_id 가, 내용 확인에 answer 전문이 필요해 컬럼을 더한다.
 
 /** 내보내기 한 행(요약 + 대화 식별자 + 질문/답변 전문). */
 export type QueryLogExportItem = QueryLogListItem & {
@@ -239,6 +239,37 @@ export async function listQueryLogsForExport(
   }
 
   return { rows, truncated };
+}
+
+// in(...) 목록이 URL 에 실리므로 대화ID 묶음을 작게 자른다(uuid 50개 ≈ 2KB).
+const SESSION_ID_BATCH = 50;
+
+/**
+ * 대화ID별 전체 질의 수(= 그 대화의 query_log 행 수). 내보내기 필터·기간과 무관하게
+ * 대화 전체를 센다 — 필터로 일부 행만 담겨도 질의수는 대화 단위 값으로 고정된다.
+ */
+export async function countQueriesBySession(
+  sessionIds: string[],
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  const ids = [...new Set(sessionIds)];
+  for (let i = 0; i < ids.length; i += SESSION_ID_BATCH) {
+    const batch = ids.slice(i, i + SESSION_ID_BATCH);
+    // 묶음당 행 수가 PostgREST 1회 상한(1,000)을 넘을 수 있어 페이지로 끝까지 읽는다.
+    for (let from = 0; ; from += EXPORT_CHUNK) {
+      const { data, error } = await getSupabaseAdmin()
+        .from("query_log")
+        .select("session_id")
+        .in("session_id", batch)
+        .order("id")
+        .range(from, from + EXPORT_CHUNK - 1);
+      if (error) throw new Error(`[query-log] session count failed: ${error.message}`);
+      const page = (data ?? []) as { session_id: string }[];
+      for (const r of page) counts.set(r.session_id, (counts.get(r.session_id) ?? 0) + 1);
+      if (page.length < EXPORT_CHUNK) break;
+    }
+  }
+  return counts;
 }
 
 /** 단건 상세(전문 포함). 없으면 null. */

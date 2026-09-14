@@ -5,11 +5,9 @@ import type { QueryLogExportItem, QueryLogFilter } from "@/lib/db/query-log";
 // 호출한다(표에 보이는 모집단 = 파일에 담기는 모집단).
 //
 // 멀티턴 대화: query_log 는 "요청 1건 = 1행"이라 같은 대화(session_id)가 여러 행으로
-// 흩어진다. 엑셀에서 대화 흐름을 읽을 수 있도록 행마다 대화 회차(그 대화의 몇 번째
-// 질문인지)와 그 대화의 총 질의 수를 함께 넣는다. 회차는 채팅 클라이언트가 보낸
-// 히스토리 길이(message_count = 2×(회차-1)+1)에서 계산하고, 값이 없는 옛 행은 세션
-// 안에서 시간순 등수로 대신한다. 총 질의 수는 "이번 내보내기 범위 안" 기준이다
-// (기간·필터로 잘린 대화는 그만큼만 세어진다).
+// 흩어진다. 행마다 그 대화에서 주고받은 질의응답 총 수(대화 질의수)를 넣는다. 질의수는
+// 내보내기 필터·기간과 무관한 대화 전체 기준이다(countQueriesBySession). 대화ID 가 없는
+// 옛 행은 단독 질의(1)로 본다.
 
 const KST_OFFSET_MS = 9 * 3600 * 1000;
 
@@ -41,44 +39,12 @@ function feedbackLabel(v: number | null): string {
   return v === 1 ? "만족" : v === -1 ? "불만족" : "";
 }
 
-type TurnInfo = { turn: number; sessionTurns: number };
-
-/**
- * 행별 대화 회차·대화 총 질의 수를 계산한다.
- * session_id 가 없는 옛 행은 각각 단독 대화(1/1)로 본다.
- */
-export function computeTurns(rows: QueryLogExportItem[]): Map<number, TurnInfo> {
-  const bySession = new Map<string, QueryLogExportItem[]>();
-  for (const r of rows) {
-    const key = r.session_id ?? `__solo__${r.id}`;
-    const g = bySession.get(key);
-    if (g) g.push(r);
-    else bySession.set(key, [r]);
-  }
-
-  const out = new Map<number, TurnInfo>();
-  for (const group of bySession.values()) {
-    const ordered = [...group].sort(
-      (a, b) =>
-        new Date(a.created_at).getTime() - new Date(b.created_at).getTime() || a.id - b.id,
-    );
-    ordered.forEach((r, i) => {
-      // message_count = 클라이언트가 보낸 히스토리 길이(1, 3, 5 …) → 회차 = ⌈mc/2⌉.
-      const fromCount =
-        r.message_count != null && r.message_count > 0
-          ? Math.ceil(r.message_count / 2)
-          : null;
-      out.set(r.id, { turn: fromCount ?? i + 1, sessionTurns: ordered.length });
-    });
-  }
-  return out;
-}
-
 type Column = {
   header: string;
   width: number;
   wrap?: boolean;
-  value: (r: QueryLogExportItem, t: TurnInfo) => string | number | null;
+  /** n = 이 행이 속한 대화의 질의수. */
+  value: (r: QueryLogExportItem, n: number) => string | number | null;
 };
 
 const COLUMNS: Column[] = [
@@ -86,9 +52,8 @@ const COLUMNS: Column[] = [
   { header: "일시(KST)", width: 19, value: (r) => fmtKst(r.created_at) },
   { header: "IP", width: 15, value: (r) => r.ip ?? "" },
   { header: "대화ID", width: 38, value: (r) => r.session_id ?? "" },
-  { header: "대화 회차", width: 9, value: (_r, t) => t.turn },
-  { header: "대화 질의수", width: 11, value: (_r, t) => t.sessionTurns },
-  { header: "멀티턴", width: 8, value: (_r, t) => (t.sessionTurns > 1 ? "Y" : "N") },
+  { header: "대화 질의수", width: 11, value: (_r, n) => n },
+  { header: "멀티턴", width: 8, value: (_r, n) => (n > 1 ? "Y" : "N") },
   { header: "분기", width: 9, value: (r) => (r.route ? ROUTE_LABEL[r.route] ?? r.route : "미분류") },
   { header: "질문", width: 60, wrap: true, value: (r) => clip(r.query) },
   { header: "답변", width: 90, wrap: true, value: (r) => clip(r.answer) },
@@ -122,6 +87,7 @@ function filterSummary(filter: QueryLogFilter): [string, string][] {
 /** 쿼리로그 행 → xlsx 버퍼. 시트 2장(쿼리로그 · 조회조건). */
 export async function buildQueryLogWorkbook(
   rows: QueryLogExportItem[],
+  sessionQueries: Map<string, number>,
   filter: QueryLogFilter,
   truncated: boolean,
 ): Promise<Buffer> {
@@ -140,11 +106,9 @@ export async function buildQueryLogWorkbook(
   head.alignment = { vertical: "middle" };
   head.height = 20;
 
-  const turns = computeTurns(rows);
-  const solo: TurnInfo = { turn: 1, sessionTurns: 1 };
   for (const r of rows) {
-    const t = turns.get(r.id) ?? solo;
-    ws.addRow(COLUMNS.map((c) => c.value(r, t)));
+    const n = (r.session_id && sessionQueries.get(r.session_id)) || 1;
+    ws.addRow(COLUMNS.map((c) => c.value(r, n)));
   }
 
   // 질문·답변만 줄바꿈 표시(나머지는 한 줄 유지 — 행 높이가 튀지 않게).
@@ -161,8 +125,8 @@ export async function buildQueryLogWorkbook(
   meta.addRow(["행 수", rows.length]);
   for (const [k, v] of filterSummary(filter)) meta.addRow([k, v]);
   meta.addRow([
-    "대화 회차",
-    "같은 대화(대화ID)의 몇 번째 질문인지. 대화 질의수는 이번 내보내기 범위 안에서 센 값.",
+    "대화 질의수",
+    "같은 대화(대화ID)에서 주고받은 질의응답 총 수. 필터·기간과 무관한 대화 전체 기준.",
   ]);
   if (truncated) {
     const row = meta.addRow(["⚠ 상한 도달", "내보내기 상한(50,000행)에 걸려 일부만 담겼습니다."]);
